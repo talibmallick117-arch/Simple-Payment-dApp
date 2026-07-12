@@ -5,11 +5,11 @@ Use this file as the final review page before submitting.
 ## Required Evidence
 
 - [ ] Public GitHub repository:
-- [ ] 10+ meaningful commits visible in GitHub history
+- [x] 10+ meaningful commits visible in GitHub history
 - [ ] Live demo link:
-- [ ] Payment Tracker contract deployment address:
-- [ ] Payment Stats contract deployment address:
-- [ ] Transaction hash for contract interaction:
+- [x] Payment Tracker contract deployment address: CBGEV62GQGZTJHVWW2NVH22I3HFEOR46MH6SFUPKJDCPKLGGA5S3ZFRH
+- [x] Payment Stats contract deployment address: CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM
+- [x] Transaction hash for contract interaction: 2bebb5fa80111c499ab20f1bb866ec417d4019b67204223747f5b452449a978e
 - [ ] Screenshot: mobile responsive UI
 - [ ] Screenshot: CI/CD pipeline running
 - [ ] Screenshot: test output with 3+ passing tests
@@ -38,3 +38,4 @@ Use this file as the final review page before submitting.
 6. Show real-time event feed updating.
 7. Show GitHub Actions passing.
 8. Show local or CI test output with 3+ passing tests.
+

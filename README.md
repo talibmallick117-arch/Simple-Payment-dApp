@@ -137,7 +137,8 @@ Fill these in after deployment:
 
 - Public GitHub repository:
 - Live demo:
-- Payment Tracker contract address:
-- Payment Stats contract address:
-- Transaction hash:
+- Payment Tracker contract address: CBGEV62GQGZTJHVWW2NVH22I3HFEOR46MH6SFUPKJDCPKLGGA5S3ZFRH
+- Payment Stats contract address: CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM
+- Transaction hash: 2bebb5fa80111c499ab20f1bb866ec417d4019b67204223747f5b452449a978e
 - Demo video:
+
