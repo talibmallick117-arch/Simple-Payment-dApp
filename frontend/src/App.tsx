@@ -1,6 +1,7 @@
 import { Activity, CheckCircle2, Clock, ExternalLink, Loader2, Send, ShieldCheck, Wallet } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
+import { connectWallet, getActiveWalletAddress } from "./lib/freighter";
 import { config, getRecentEvents, type MarketEvent } from "./lib/stellar";
 
 const paymentBatches = [
@@ -21,7 +22,27 @@ const paymentBatches = [
 export function App() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [walletAddress, setWalletAddress] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [walletError, setWalletError] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+
+    async function hydrateWallet() {
+      const address = await getActiveWalletAddress();
+      if (alive && address) {
+        setWalletAddress(address);
+      }
+    }
+
+    hydrateWallet();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -51,6 +72,28 @@ export function App() {
     []
   );
 
+  async function handleConnectWallet() {
+    setIsConnecting(true);
+    setWalletError("");
+
+    try {
+      const result = await connectWallet(config.network);
+      if (result.error) {
+        setWalletAddress("");
+        setWalletError(result.error);
+        return;
+      }
+
+      setWalletAddress(result.address);
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Unable to connect wallet.");
+    } finally {
+      setIsConnecting(false);
+    }
+  }
+
+  const walletLabel = walletAddress ? shortenAddress(walletAddress) : "Connect wallet";
+
   return (
     <main className="app">
       <section className="summary">
@@ -61,10 +104,11 @@ export function App() {
             Multi-address payment batches with per-recipient status updates and live Soroban event streaming.
           </p>
         </div>
-        <button className="primary" type="button">
-          <Wallet size={18} />
-          Connect wallet
+        <button className="primary" type="button" onClick={handleConnectWallet} disabled={isConnecting}>
+          {isConnecting ? <Loader2 className="spin" size={18} /> : <Wallet size={18} />}
+          {isConnecting ? "Connecting..." : walletLabel}
         </button>
+        {walletError && <p className="error">{walletError}</p>}
       </section>
 
       <section className="stats" aria-label="Project status">
@@ -130,4 +174,8 @@ function StatusTile({ icon, label, value }: { icon: React.ReactNode; label: stri
       <strong>{value}</strong>
     </div>
   );
+}
+
+function shortenAddress(address: string) {
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
 }

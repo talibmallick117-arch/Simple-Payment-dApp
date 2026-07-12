@@ -12,6 +12,11 @@ vi.mock("./lib/stellar", () => ({
   getRecentEvents: vi.fn(async () => [])
 }));
 
+vi.mock("./lib/freighter", () => ({
+  connectWallet: vi.fn(),
+  getActiveWalletAddress: vi.fn(async () => "")
+}));
+
 describe("App", () => {
   afterEach(() => {
     cleanup();
