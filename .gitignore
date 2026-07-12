@@ -6,3 +6,4 @@ dist/
 .stellar/
 
 frontend/*.tsbuildinfo
+contracts/**/test_snapshots/
