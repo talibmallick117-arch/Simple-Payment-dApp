@@ -135,10 +135,12 @@ The frontend can be deployed to Vercel or Netlify from the `frontend` directory.
 
 Fill these in after deployment:
 
-- Public GitHub repository:
-- Live demo:
+- Public GitHub repository: https://github.com/talibmallick117-arch/Simple-Payment-dApp
+- Live demo: 
+- Vercel dashboard/project area: https://vercel.com/talibmallick117-7774s-projects
 - Payment Tracker contract address: CBGEV62GQGZTJHVWW2NVH22I3HFEOR46MH6SFUPKJDCPKLGGA5S3ZFRH
 - Payment Stats contract address: CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM
 - Transaction hash: 2bebb5fa80111c499ab20f1bb866ec417d4019b67204223747f5b452449a978e
 - Demo video:
+
 
