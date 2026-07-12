@@ -176,6 +176,11 @@ export async function createBatchOnContract(input: {
       walletAddress: input.walletAddress
     });
 
+    console.log("[soroban] createBatchOnContract before building transaction", {
+      normalizedRecipients,
+      normalizedAmounts
+    });
+
     const tx = await contractClient.create_batch({
       sender: input.sender,
       token: input.token,
@@ -186,12 +191,14 @@ export async function createBatchOnContract(input: {
     }, { simulate: true });
     console.log("[soroban] createBatchOnContract transaction assembled", { hasBuilt: Boolean(tx.built) });
 
+    console.log("[soroban] createBatchOnContract before simulation");
     const assembled = await tx.simulate();
     console.log("[soroban] createBatchOnContract simulation complete", {
       hasBuilt: Boolean(assembled.built),
       xdrLength: assembled.built?.toXDR().length ?? 0
     });
 
+    console.log("[soroban] createBatchOnContract before signTransaction");
     const signed = await signTransactionWithFreighter(assembled.built?.toXDR() ?? "", {
       address: input.walletAddress,
       networkPassphrase: input.networkPassphrase || networks.testnet.networkPassphrase

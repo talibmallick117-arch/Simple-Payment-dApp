@@ -199,6 +199,18 @@ export function App() {
   }
 
   async function handleCreateBatch() {
+    console.log("[app] Create Batch clicked");
+    console.log("[app] createBatch start", {
+      walletAddress,
+      walletNetworkPassphrase,
+      memoInput,
+      tokenInput,
+      statsContractInput,
+      recipientsInput,
+      amountsInput,
+      isSubmitting
+    });
+
     if (!walletAddress || !walletNetworkPassphrase) {
       setWalletError("Connect your Freighter wallet before creating a batch.");
       return;
@@ -454,7 +466,17 @@ export function App() {
               Amounts (comma-separated)
               <textarea value={amountsInput} onChange={(event) => setAmountsInput(event.target.value)} placeholder="50,75" />
             </label>
-            <button className="secondary" type="button" onClick={handleCreateBatch} disabled={isSubmitting}>
+            <button
+              className="secondary"
+              type="button"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                console.log("[app] Create Batch button clicked");
+                void handleCreateBatch();
+              }}
+              disabled={isSubmitting}
+            >
               {isSubmitting ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
               Create batch
             </button>
