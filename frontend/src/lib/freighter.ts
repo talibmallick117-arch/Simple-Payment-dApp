@@ -2,6 +2,7 @@ import {
   getAddress,
   getNetworkDetails,
   isConnected,
+  signTransaction,
   requestAccess
 } from "@stellar/freighter-api";
 import { Networks } from "@stellar/stellar-sdk";
@@ -19,6 +20,11 @@ export type WalletConnectionResult =
       networkPassphrase: "";
       error: string;
     };
+
+export type WalletSession = {
+  address: string;
+  networkPassphrase: string;
+};
 
 function formatFreighterError(error: unknown) {
   if (typeof error === "string") return error;
@@ -128,4 +134,14 @@ export async function getActiveWalletAddress() {
   if (!status.isConnected || status.error) return "";
   const response = await getAddress();
   return response.error ? "" : response.address;
+}
+
+export async function signTransactionWithFreighter(
+  transactionXdr: string,
+  session: WalletSession
+) {
+  return signTransaction(transactionXdr, {
+    address: session.address,
+    networkPassphrase: session.networkPassphrase
+  });
 }

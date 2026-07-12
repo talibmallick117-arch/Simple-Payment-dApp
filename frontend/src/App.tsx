@@ -1,7 +1,19 @@
-import { Activity, CheckCircle2, Clock, ExternalLink, Loader2, Send, ShieldCheck, Wallet } from "lucide-react";
+import {
+  Activity,
+  CheckCircle2,
+  ChevronDown,
+  Clock,
+  Copy,
+  ExternalLink,
+  Loader2,
+  Send,
+  ShieldCheck,
+  Wallet
+} from "lucide-react";
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { connectWallet, getActiveWalletAddress } from "./lib/freighter";
+import { buildStellarExpertAccountUrl, copyTextToClipboard, shortenAddress } from "./lib/wallet";
 import { config, getRecentEvents, type MarketEvent } from "./lib/stellar";
 
 const paymentBatches = [
@@ -25,7 +37,10 @@ export function App() {
   const [walletAddress, setWalletAddress] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [walletError, setWalletError] = useState("");
+  const [walletNotice, setWalletNotice] = useState("");
+  const [isWalletMenuOpen, setIsWalletMenuOpen] = useState(false);
   const [error, setError] = useState("");
+  const walletMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -41,6 +56,28 @@ export function App() {
 
     return () => {
       alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePointerDown(event: MouseEvent) {
+      if (!walletMenuRef.current?.contains(event.target as Node)) {
+        setIsWalletMenuOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsWalletMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
 
@@ -75,9 +112,10 @@ export function App() {
   async function handleConnectWallet() {
     setIsConnecting(true);
     setWalletError("");
+    setWalletNotice("");
 
     try {
-      const result = await connectWallet(config.network);
+      const result = await connectWallet();
       if (result.error) {
         setWalletAddress("");
         setWalletError(result.error);
@@ -85,11 +123,39 @@ export function App() {
       }
 
       setWalletAddress(result.address);
+      setIsWalletMenuOpen(false);
     } catch (err) {
       setWalletError(err instanceof Error ? err.message : "Unable to connect wallet.");
     } finally {
       setIsConnecting(false);
     }
+  }
+
+  async function handleWalletButtonClick() {
+    if (!walletAddress) {
+      await handleConnectWallet();
+      return;
+    }
+
+    setIsWalletMenuOpen((current) => !current);
+    setWalletNotice("");
+    setWalletError("");
+  }
+
+  async function handleCopyAddress() {
+    try {
+      await copyTextToClipboard(walletAddress);
+      setWalletNotice("Address copied to clipboard.");
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Unable to copy wallet address.");
+    } finally {
+      setIsWalletMenuOpen(false);
+    }
+  }
+
+  function handleOpenExplorer() {
+    window.open(buildStellarExpertAccountUrl(walletAddress), "_blank", "noopener,noreferrer");
+    setIsWalletMenuOpen(false);
   }
 
   const walletLabel = walletAddress ? shortenAddress(walletAddress) : "Connect wallet";
@@ -104,11 +170,38 @@ export function App() {
             Multi-address payment batches with per-recipient status updates and live Soroban event streaming.
           </p>
         </div>
-        <button className="primary" type="button" onClick={handleConnectWallet} disabled={isConnecting}>
-          {isConnecting ? <Loader2 className="spin" size={18} /> : <Wallet size={18} />}
-          {isConnecting ? "Connecting..." : walletLabel}
-        </button>
+        <div className="wallet" ref={walletMenuRef}>
+          <button
+            className="primary walletButton"
+            type="button"
+            onClick={handleWalletButtonClick}
+            disabled={isConnecting}
+            aria-haspopup={walletAddress ? "menu" : undefined}
+            aria-expanded={walletAddress ? isWalletMenuOpen : undefined}
+          >
+            {isConnecting ? <Loader2 className="spin" size={18} /> : <Wallet size={18} />}
+            {isConnecting ? "Connecting..." : walletLabel}
+            {walletAddress && !isConnecting && <ChevronDown size={16} />}
+          </button>
+          {walletAddress && isWalletMenuOpen && (
+            <div className="walletMenu" role="menu" aria-label="Wallet actions">
+              <button className="walletMenuItem" type="button" onClick={handleCopyAddress} role="menuitem">
+                <Copy size={16} />
+                Copy address
+              </button>
+              <button className="walletMenuItem" type="button" onClick={handleOpenExplorer} role="menuitem">
+                <ExternalLink size={16} />
+                Open in Stellar Expert
+              </button>
+              <button className="walletMenuItem" type="button" onClick={handleConnectWallet} role="menuitem">
+                <Wallet size={16} />
+                Reconnect wallet
+              </button>
+            </div>
+          )}
+        </div>
         {walletError && <p className="error">{walletError}</p>}
+        {!walletError && walletNotice && <p className="notice">{walletNotice}</p>}
       </section>
 
       <section className="stats" aria-label="Project status">
@@ -174,8 +267,4 @@ function StatusTile({ icon, label, value }: { icon: React.ReactNode; label: stri
       <strong>{value}</strong>
     </div>
   );
-}
-
-function shortenAddress(address: string) {
-  return `${address.slice(0, 4)}...${address.slice(-4)}`;
 }

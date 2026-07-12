@@ -61,7 +61,8 @@ h1 {
 
 .primary,
 .secondary,
-.iconButton {
+.iconButton,
+.walletMenuItem {
   align-items: center;
   border: 0;
   cursor: pointer;
@@ -75,6 +76,11 @@ h1 {
   gap: 10px;
   min-height: 48px;
   padding: 0 18px;
+}
+
+.walletButton {
+  min-width: 220px;
+  justify-content: space-between;
 }
 
 .secondary {
@@ -155,6 +161,34 @@ h1 {
   margin: 0;
 }
 
+.wallet {
+  position: relative;
+}
+
+.walletMenu {
+  background: white;
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+  box-shadow: 0 16px 32px rgba(23, 32, 29, 0.12);
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: min(260px, 90vw);
+  z-index: 20;
+}
+
+.walletMenuItem {
+  background: #f5f7f4;
+  color: #17201d;
+  gap: 10px;
+  justify-content: flex-start;
+  min-height: 40px;
+  padding: 0 12px;
+}
+
 .iconButton {
   background: #edf4f1;
   color: #17201d;
@@ -215,6 +249,11 @@ h1 {
   padding: 14px;
 }
 
+.notice {
+  color: #286147;
+  margin: 0;
+}
+
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -241,6 +280,17 @@ h1 {
   }
 
   .primary {
+    width: 100%;
+  }
+
+  .walletButton {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .walletMenu {
+    left: 0;
+    right: auto;
     width: 100%;
   }
 
