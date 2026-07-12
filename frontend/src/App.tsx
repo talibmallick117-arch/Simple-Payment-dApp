@@ -13,33 +13,37 @@ import {
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { connectWallet, getActiveWalletAddress } from "./lib/freighter";
+import {
+  createBatchOnContract,
+  fundBatchOnContract,
+  loadBatchFromContract,
+  markFailedOnContract,
+  markSentOnContract,
+  refundPendingOnContract,
+  type BatchSummary
+} from "./lib/soroban";
 import { buildStellarExpertAccountUrl, copyTextToClipboard, shortenAddress } from "./lib/wallet";
 import { config, getRecentEvents, type MarketEvent } from "./lib/stellar";
-
-const paymentBatches = [
-  {
-    title: "July contractor payouts",
-    recipients: "8 addresses",
-    amount: "1,240 XLM",
-    status: "5 sent"
-  },
-  {
-    title: "Community rewards round",
-    recipients: "14 addresses",
-    amount: "620 XLM",
-    status: "Tracking"
-  }
-];
 
 export function App() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isBatchLoading, setIsBatchLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [walletAddress, setWalletAddress] = useState("");
+  const [walletNetworkPassphrase, setWalletNetworkPassphrase] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [walletError, setWalletError] = useState("");
   const [walletNotice, setWalletNotice] = useState("");
   const [isWalletMenuOpen, setIsWalletMenuOpen] = useState(false);
   const [error, setError] = useState("");
+  const [batch, setBatch] = useState<BatchSummary | null>(null);
+  const [batchIdInput, setBatchIdInput] = useState("1");
+  const [memoInput, setMemoInput] = useState("July contractor payouts");
+  const [tokenInput, setTokenInput] = useState("");
+  const [statsContractInput, setStatsContractInput] = useState(config.paymentStatsContractId);
+  const [recipientsInput, setRecipientsInput] = useState("");
+  const [amountsInput, setAmountsInput] = useState("");
   const walletMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -96,18 +100,46 @@ export function App() {
       }
     }
 
-    loadEvents();
-    const timer = window.setInterval(loadEvents, 15_000);
+    void loadEvents();
+    const timer = window.setInterval(() => {
+      void loadEvents();
+    }, 15_000);
     return () => {
       alive = false;
       window.clearInterval(timer);
     };
   }, []);
 
+  useEffect(() => {
+    void loadBatchFromCurrentId();
+  }, []);
+
   const configured = useMemo(
     () => Boolean(config.paymentTrackerContractId && config.paymentStatsContractId),
     []
   );
+
+  async function loadBatchFromCurrentId() {
+    const id = Number(batchIdInput || 1);
+    if (!Number.isFinite(id) || id <= 0) {
+      return;
+    }
+
+    setIsBatchLoading(true);
+    setWalletError("");
+    try {
+      const nextBatch = await loadBatchFromContract(id);
+      setBatch(nextBatch);
+      if (nextBatch) {
+        setBatchIdInput(String(nextBatch.id));
+      }
+    } catch (err) {
+      setBatch(null);
+      setError(err instanceof Error ? err.message : "Unable to load batch data.");
+    } finally {
+      setIsBatchLoading(false);
+    }
+  }
 
   async function handleConnectWallet() {
     setIsConnecting(true);
@@ -118,12 +150,15 @@ export function App() {
       const result = await connectWallet();
       if (result.error) {
         setWalletAddress("");
+        setWalletNetworkPassphrase("");
         setWalletError(result.error);
         return;
       }
 
       setWalletAddress(result.address);
+      setWalletNetworkPassphrase(result.networkPassphrase);
       setIsWalletMenuOpen(false);
+      setWalletNotice("Wallet connected. You can now sign Soroban transactions.");
     } catch (err) {
       setWalletError(err instanceof Error ? err.message : "Unable to connect wallet.");
     } finally {
@@ -158,6 +193,151 @@ export function App() {
     setIsWalletMenuOpen(false);
   }
 
+  async function handleLoadBatch() {
+    await loadBatchFromCurrentId();
+  }
+
+  async function handleCreateBatch() {
+    if (!walletAddress || !walletNetworkPassphrase) {
+      setWalletError("Connect your Freighter wallet before creating a batch.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setWalletError("");
+    setWalletNotice("");
+
+    try {
+      const recipients = recipientsInput.split(",").map((item) => item.trim()).filter(Boolean);
+      const amounts = amountsInput.split(",").map((item) => item.trim()).filter(Boolean);
+      const result = await createBatchOnContract({
+        sender: walletAddress,
+        token: tokenInput || "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        statsContract: statsContractInput || config.paymentStatsContractId,
+        memo: memoInput,
+        recipients,
+        amounts,
+        walletAddress,
+        networkPassphrase: walletNetworkPassphrase
+      });
+
+      if (!result.success) {
+        setWalletError(result.message || "The batch could not be created.");
+        return;
+      }
+
+      setWalletNotice("Batch created successfully. Refreshing the latest batch state.");
+      const nextBatchId = result.id ?? Number(batchIdInput || 1);
+      setBatchIdInput(String(nextBatchId));
+      await loadBatchFromContract(nextBatchId);
+      setBatch(await loadBatchFromContract(nextBatchId));
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Unable to create the batch.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleFundBatch() {
+    if (!walletAddress || !walletNetworkPassphrase) {
+      setWalletError("Connect your Freighter wallet before funding a batch.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setWalletError("");
+    setWalletNotice("");
+
+    try {
+      const result = await fundBatchOnContract({ batchId: Number(batchIdInput), walletAddress, networkPassphrase: walletNetworkPassphrase });
+      if (!result.success) {
+        setWalletError(result.message || "The batch could not be funded.");
+        return;
+      }
+      setWalletNotice("Batch funded successfully.");
+      await handleLoadBatch();
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Unable to fund the batch.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleMarkSent(index: number) {
+    if (!walletAddress || !walletNetworkPassphrase) {
+      setWalletError("Connect your Freighter wallet before updating a payment.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setWalletError("");
+    setWalletNotice("");
+
+    try {
+      const result = await markSentOnContract({ batchId: Number(batchIdInput), index, txRef: `ui-${Date.now()}`, walletAddress, networkPassphrase: walletNetworkPassphrase });
+      if (!result.success) {
+        setWalletError(result.message || "The payment could not be marked as sent.");
+        return;
+      }
+      setWalletNotice("Payment marked as sent.");
+      await handleLoadBatch();
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Unable to mark the payment as sent.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleMarkFailed(index: number) {
+    if (!walletAddress || !walletNetworkPassphrase) {
+      setWalletError("Connect your Freighter wallet before updating a payment.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setWalletError("");
+    setWalletNotice("");
+
+    try {
+      const result = await markFailedOnContract({ batchId: Number(batchIdInput), index, reason: "UI marked failed", walletAddress, networkPassphrase: walletNetworkPassphrase });
+      if (!result.success) {
+        setWalletError(result.message || "The payment could not be marked as failed.");
+        return;
+      }
+      setWalletNotice("Payment marked as failed.");
+      await handleLoadBatch();
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Unable to mark the payment as failed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRefundPending() {
+    if (!walletAddress || !walletNetworkPassphrase) {
+      setWalletError("Connect your Freighter wallet before refunding pending payments.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setWalletError("");
+    setWalletNotice("");
+
+    try {
+      const result = await refundPendingOnContract({ batchId: Number(batchIdInput), walletAddress, networkPassphrase: walletNetworkPassphrase });
+      if (!result.success) {
+        setWalletError(result.message || "Pending payments could not be refunded.");
+        return;
+      }
+      setWalletNotice("Pending payments refunded.");
+      await handleLoadBatch();
+    } catch (err) {
+      setWalletError(err instanceof Error ? err.message : "Unable to refund pending payments.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   const walletLabel = walletAddress ? shortenAddress(walletAddress) : "Connect wallet";
 
   return (
@@ -167,7 +347,7 @@ export function App() {
           <p className="eyebrow">Stellar testnet payments</p>
           <h1>Payment Tracker</h1>
           <p className="lead">
-            Multi-address payment batches with per-recipient status updates and live Soroban event streaming.
+            Multi-address payment batches with real Soroban contract calls, wallet signing, and live event streaming.
           </p>
         </div>
         <div className="wallet" ref={walletMenuRef}>
@@ -207,33 +387,107 @@ export function App() {
       <section className="stats" aria-label="Project status">
         <StatusTile icon={<ShieldCheck />} label="Contracts" value={configured ? "Configured" : "Env needed"} />
         <StatusTile icon={<Activity />} label="Events" value={isLoading ? "Syncing" : `${events.length} recent`} />
-        <StatusTile icon={<CheckCircle2 />} label="Tests" value="5+ covered" />
+        <StatusTile icon={<CheckCircle2 />} label="On-chain" value={batch ? `Batch ${batch.id}` : "Awaiting load"} />
       </section>
 
       <section className="workspace">
         <div className="panel bounties">
           <div className="panelTitle">
-            <h2>Payment batches</h2>
-            <button className="iconButton" type="button" aria-label="Open explorer">
+            <h2>Contract batch view</h2>
+            <button className="iconButton" type="button" aria-label="Open explorer" onClick={handleLoadBatch}>
               <ExternalLink size={18} />
             </button>
           </div>
-          {paymentBatches.map((batch) => (
-            <article className="bounty" key={batch.title}>
+
+          <div className="inlineForm">
+            <label>
+              Batch ID
+              <input value={batchIdInput} onChange={(event) => setBatchIdInput(event.target.value)} />
+            </label>
+            <button className="secondary" type="button" onClick={handleLoadBatch} disabled={isBatchLoading}>
+              {isBatchLoading ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
+              Load batch
+            </button>
+          </div>
+
+          {batch ? (
+            <article className="bounty contractBatch">
               <div>
-                <h3>{batch.title}</h3>
-                <p>{batch.recipients}</p>
+                <h3>{batch.memo || `Batch ${batch.id}`}</h3>
+                <p>Sender: {batch.sender || "Unknown"}</p>
+                <p>Recipient count: {batch.recipientCount}</p>
+                <p>Total amount: {batch.totalAmount}</p>
               </div>
               <div className="bountyMeta">
-                <strong>{batch.amount}</strong>
-                <span>{batch.status}</span>
+                <strong>{batch.funded ? "Funded" : "Pending funding"}</strong>
+                <span>{batch.refunded ? "Refunded" : `${batch.sentCount} sent / ${batch.failedCount} failed`}</span>
               </div>
             </article>
-          ))}
-          <button className="secondary" type="button">
-            <Send size={18} />
-            Create batch
-          </button>
+          ) : (
+            <p className="empty">No batch data loaded yet. Enter a batch ID and fetch it from the deployed contract.</p>
+          )}
+
+          <div className="actionPanel">
+            <h3>Create batch</h3>
+            <label>
+              Memo
+              <input value={memoInput} onChange={(event) => setMemoInput(event.target.value)} />
+            </label>
+            <label>
+              Token contract
+              <input value={tokenInput} onChange={(event) => setTokenInput(event.target.value)} placeholder="Token contract address" />
+            </label>
+            <label>
+              Stats contract
+              <input value={statsContractInput} onChange={(event) => setStatsContractInput(event.target.value)} />
+            </label>
+            <label>
+              Recipients (comma-separated)
+              <textarea value={recipientsInput} onChange={(event) => setRecipientsInput(event.target.value)} placeholder="G...,G..." />
+            </label>
+            <label>
+              Amounts (comma-separated)
+              <textarea value={amountsInput} onChange={(event) => setAmountsInput(event.target.value)} placeholder="50,75" />
+            </label>
+            <button className="secondary" type="button" onClick={handleCreateBatch} disabled={isSubmitting}>
+              {isSubmitting ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
+              Create batch
+            </button>
+          </div>
+
+          <div className="actionPanel">
+            <h3>Batch actions</h3>
+            <button className="secondary" type="button" onClick={handleFundBatch} disabled={isSubmitting || !batch}>
+              {isSubmitting ? <Loader2 className="spin" size={18} /> : <ShieldCheck size={18} />}
+              Fund batch
+            </button>
+            <button className="secondary" type="button" onClick={handleRefundPending} disabled={isSubmitting || !batch}>
+              {isSubmitting ? <Loader2 className="spin" size={18} /> : <ShieldCheck size={18} />}
+              Refund pending
+            </button>
+          </div>
+
+          {batch?.payments?.length ? (
+            <div className="actionPanel">
+              <h3>Recipient payments</h3>
+              {batch.payments.map((payment) => (
+                <div className="paymentRow" key={`${payment.index}-${payment.recipient}`}>
+                  <div>
+                    <strong>{payment.recipient.slice(0, 12)}...</strong>
+                    <p>Amount: {payment.amount} • {payment.status}</p>
+                  </div>
+                  <div className="paymentActions">
+                    <button className="secondary compact" type="button" onClick={() => void handleMarkSent(payment.index)} disabled={isSubmitting}>
+                      Mark sent
+                    </button>
+                    <button className="secondary compact" type="button" onClick={() => void handleMarkFailed(payment.index)} disabled={isSubmitting}>
+                      Mark failed
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="panel events">
@@ -243,7 +497,7 @@ export function App() {
           </div>
           {error && <p className="error">{error}</p>}
           {!error && !isLoading && events.length === 0 && (
-            <p className="empty">No payment events found yet. Deploy contracts and send or update one payment to populate this feed.</p>
+            <p className="empty">No payment events found yet. The contract is connected, but no events have been emitted on testnet yet.</p>
           )}
           <div className="eventList">
             {events.map((event) => (

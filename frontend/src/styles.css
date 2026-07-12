@@ -93,6 +93,56 @@ h1 {
   width: 100%;
 }
 
+.secondary.compact {
+  margin-top: 0;
+  min-height: 36px;
+  padding: 0 12px;
+  width: auto;
+}
+
+.secondary:disabled,
+.iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.inlineForm,
+.actionPanel,
+.paymentRow {
+  display: grid;
+  gap: 10px;
+}
+
+.inlineForm label,
+.actionPanel label {
+  color: #52615e;
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.inlineForm input,
+.inlineForm textarea,
+.actionPanel input,
+.actionPanel textarea {
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.paymentRow {
+  background: #f5f7f4;
+  border: 1px solid #dfe6df;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.paymentActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .stats,
 .workspace {
   display: grid;
