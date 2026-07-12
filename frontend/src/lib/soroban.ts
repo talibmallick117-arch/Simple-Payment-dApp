@@ -92,6 +92,28 @@ function mapPaymentStatus(value: unknown): PaymentStatus {
   return "Pending";
 }
 
+export function normalizeBatchFormValues(
+  recipientsInput: string,
+  amountsInput: string,
+  fallbackRecipient: string,
+  fallbackAmount: string
+): { recipients: string[]; amounts: string[] } {
+  const recipients = recipientsInput.split(",").map((item) => item.trim()).filter(Boolean);
+  const amounts = amountsInput.split(",").map((item) => item.trim()).filter(Boolean);
+
+  if (recipients.length > 0 && amounts.length > 0) {
+    return {
+      recipients,
+      amounts
+    };
+  }
+
+  return {
+    recipients: recipients.length > 0 ? recipients : [fallbackRecipient],
+    amounts: amounts.length > 0 ? amounts : [fallbackAmount]
+  };
+}
+
 export async function loadBatchFromContract(batchId: number): Promise<BatchSummary | null> {
   if (!config.paymentTrackerContractId) return null;
 
@@ -142,19 +164,39 @@ export async function createBatchOnContract(input: {
   networkPassphrase: string;
 }): Promise<ContractActionResult> {
   try {
+    const normalizedRecipients = input.recipients.filter(Boolean);
+    const normalizedAmounts = input.amounts.filter(Boolean);
+
+    console.log("[soroban] createBatchOnContract start", {
+      contractId: config.paymentTrackerContractId,
+      sender: input.sender,
+      recipients: normalizedRecipients,
+      amounts: normalizedAmounts,
+      memo: input.memo,
+      walletAddress: input.walletAddress
+    });
+
     const tx = await contractClient.create_batch({
       sender: input.sender,
       token: input.token,
       stats_contract: input.statsContract,
       memo: input.memo,
-      recipients: input.recipients,
-      amounts: input.amounts.map((amount) => BigInt(amount))
+      recipients: normalizedRecipients,
+      amounts: normalizedAmounts.map((amount) => BigInt(amount))
     }, { simulate: true });
+    console.log("[soroban] createBatchOnContract transaction assembled", { hasBuilt: Boolean(tx.built) });
+
     const assembled = await tx.simulate();
+    console.log("[soroban] createBatchOnContract simulation complete", {
+      hasBuilt: Boolean(assembled.built),
+      xdrLength: assembled.built?.toXDR().length ?? 0
+    });
+
     const signed = await signTransactionWithFreighter(assembled.built?.toXDR() ?? "", {
       address: input.walletAddress,
       networkPassphrase: input.networkPassphrase || networks.testnet.networkPassphrase
     });
+    console.log("[soroban] createBatchOnContract signTransactionWithFreighter response", signed);
     if (signed.error) return { success: false, message: parseContractError(signed.error) };
     const transaction = TransactionBuilder.fromXDR(signed.signedTxXdr, input.networkPassphrase || networks.testnet.networkPassphrase);
     const response = await rpcServer.sendTransaction(transaction as never);

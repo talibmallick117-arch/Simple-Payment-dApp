@@ -19,6 +19,7 @@ import {
   loadBatchFromContract,
   markFailedOnContract,
   markSentOnContract,
+  normalizeBatchFormValues,
   refundPendingOnContract,
   type BatchSummary
 } from "./lib/soroban";
@@ -208,8 +209,12 @@ export function App() {
     setWalletNotice("");
 
     try {
-      const recipients = recipientsInput.split(",").map((item) => item.trim()).filter(Boolean);
-      const amounts = amountsInput.split(",").map((item) => item.trim()).filter(Boolean);
+      const { recipients, amounts } = normalizeBatchFormValues(
+        recipientsInput,
+        amountsInput,
+        walletAddress,
+        "1"
+      );
       const result = await createBatchOnContract({
         sender: walletAddress,
         token: tokenInput || "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
