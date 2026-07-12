@@ -4,6 +4,7 @@ import {
   isConnected,
   requestAccess
 } from "@stellar/freighter-api";
+import { Networks } from "@stellar/stellar-sdk";
 
 export type WalletConnectionResult =
   | {
@@ -40,7 +41,7 @@ function isRejectedFreighterError(error: unknown) {
   );
 }
 
-export async function connectWallet(expectedNetwork = "testnet"): Promise<WalletConnectionResult> {
+export async function connectWallet(): Promise<WalletConnectionResult> {
   const status = await isConnected();
   if (status.error) {
     return {
@@ -73,6 +74,8 @@ export async function connectWallet(expectedNetwork = "testnet"): Promise<Wallet
   }
 
   const networkDetails = await getNetworkDetails();
+  console.log("Freighter network details:", networkDetails);
+
   if (networkDetails.error) {
     return {
       address: "",
@@ -82,12 +85,24 @@ export async function connectWallet(expectedNetwork = "testnet"): Promise<Wallet
     };
   }
 
-  if (networkDetails.network !== expectedNetwork) {
+  const expectedPassphrase = Networks.TESTNET;
+  console.log("Freighter network comparison:", {
+    network: networkDetails.network,
+    networkPassphrase: networkDetails.networkPassphrase,
+    expectedPassphrase
+  });
+
+  const networkMatches =
+    networkDetails.network === "TESTNET" ||
+    networkDetails.networkPassphrase === expectedPassphrase ||
+    networkDetails.network.toUpperCase() === "TESTNET";
+
+  if (!networkMatches) {
     return {
       address: "",
       network: "",
       networkPassphrase: "",
-      error: `Switch Freighter to ${expectedNetwork} and try again.`
+      error: "Switch Freighter to Testnet and try again."
     };
   }
 
