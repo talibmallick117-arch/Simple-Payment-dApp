@@ -102,7 +102,7 @@ stellar contract invoke \
   --source-account deployer \
   --network testnet \
   -- init \
-  --tracker PAYMENT_TRACKER_CONTRACT_ID
+  --tracker CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB
 ```
 
 Copy the resulting contract IDs into `frontend/.env.local`.
@@ -118,8 +118,8 @@ Environment:
 ```env
 VITE_STELLAR_NETWORK=testnet
 VITE_STELLAR_RPC_URL=https://soroban-testnet.stellar.org
-VITE_PAYMENT_TRACKER_CONTRACT_ID=YOUR_PAYMENT_TRACKER_CONTRACT_ID
-VITE_PAYMENT_STATS_CONTRACT_ID=YOUR_PAYMENT_STATS_CONTRACT_ID
+VITE_PAYMENT_TRACKER_CONTRACT_ID=CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB
+VITE_PAYMENT_STATS_CONTRACT_ID=CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM
 ```
 
 ## CI/CD
@@ -138,7 +138,9 @@ Fill these in after deployment:
 - Public GitHub repository: https://github.com/talibmallick117-arch/Simple-Payment-dApp
 - Live demo: 
 - Vercel dashboard/project area: https://vercel.com/talibmallick117-7774s-projects
-- Payment Tracker contract address: CBGEV62GQGZTJHVWW2NVH22I3HFEOR46MH6SFUPKJDCPKLGGA5S3ZFRH
+- Payment Tracker contract address: CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB
+- Deployment network: Stellar Testnet
+- Deployment transaction hash: 605260c75c44980fe4a9068c2b509e83d4066d4df9924ffa780e66fca2a4fcd6
 - Payment Stats contract address: CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM
 - Transaction hash: 2bebb5fa80111c499ab20f1bb866ec417d4019b67204223747f5b452449a978e
 - Demo video:
