@@ -1,0 +1,12 @@
+{
+  "name": "stellar-payment-tracker",
+  "private": true,
+  "workspaces": [
+    "frontend"
+  ],
+  "scripts": {
+    "test": "npm test --workspace frontend",
+    "build": "npm run build --workspace frontend",
+    "lint": "npm run lint --workspace frontend"
+  }
+}
