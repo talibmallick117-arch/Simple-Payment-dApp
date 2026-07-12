@@ -19,10 +19,6 @@ export type WalletConnectionResult =
       error: string;
     };
 
-function isFreighterInstalled() {
-  return typeof window !== "undefined" && window.freighter === true;
-}
-
 function formatFreighterError(error: unknown) {
   if (typeof error === "string") return error;
   if (error && typeof error === "object" && "message" in error) {
@@ -45,22 +41,22 @@ function isRejectedFreighterError(error: unknown) {
 }
 
 export async function connectWallet(expectedNetwork = "testnet"): Promise<WalletConnectionResult> {
-  if (!isFreighterInstalled()) {
+  const status = await isConnected();
+  if (status.error) {
     return {
       address: "",
       network: "",
       networkPassphrase: "",
-      error: "Freighter is not installed."
+      error: "Freighter could not be reached. Make sure the extension is installed, enabled, and unlocked."
     };
   }
 
-  const status = await isConnected();
-  if ("error" in status && status.error) {
+  if (!status.isConnected) {
     return {
       address: "",
       network: "",
       networkPassphrase: "",
-      error: formatFreighterError(status.error)
+      error: "Freighter is installed but locked or not connected. Unlock it, then try again."
     };
   }
 
@@ -113,9 +109,8 @@ export async function connectWallet(expectedNetwork = "testnet"): Promise<Wallet
 }
 
 export async function getActiveWalletAddress() {
-  if (!isFreighterInstalled()) return "";
-
+  const status = await isConnected();
+  if (!status.isConnected || status.error) return "";
   const response = await getAddress();
   return response.error ? "" : response.address;
 }
-
