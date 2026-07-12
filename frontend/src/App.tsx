@@ -199,7 +199,7 @@ export function App() {
   }
 
   async function handleCreateBatch() {
-    console.log("[app] Create Batch clicked");
+    console.log("Create Batch clicked");
     console.log("[app] createBatch start", {
       walletAddress,
       walletNetworkPassphrase,
