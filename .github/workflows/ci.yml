@@ -6,34 +6,51 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Format
         run: cargo fmt --all -- --check
+
       - name: Test contracts
         run: cargo test --workspace
 
   frontend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install
-        run: npm install
-      - name: Lint
-        run: npm run lint
-      - name: Test
-        run: npm test -- --run
-      - name: Build
-        run: npm run build
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint frontend
+        run: npm run lint --workspace frontend
+
+      - name: Test frontend
+        run: npm test --workspace frontend -- --run
+
+      - name: Build frontend
+        run: npm run build --workspace frontend

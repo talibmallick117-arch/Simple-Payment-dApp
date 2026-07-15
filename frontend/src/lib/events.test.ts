@@ -19,15 +19,17 @@ vi.mock("@stellar/stellar-base", () => ({
 }));
 
 vi.mock("@stellar/stellar-sdk", () => ({
-  rpc: {
-    Server: class {
-      getLatestLedger = mocks.getLatestLedger;
-      getEvents = mocks.getEvents;
+    rpc: {
+      Server: class {
+        getLatestLedger = mocks.getLatestLedger;
+        getEvents = mocks.getEvents;
 
-      constructor(_url: string) {}
+        constructor(url: string) {
+          void url;
+        }
+      }
     }
-  }
-}));
+  }));
 
 vi.mock("./soroban", () => ({
   loadBatchFromContract: vi.fn()
