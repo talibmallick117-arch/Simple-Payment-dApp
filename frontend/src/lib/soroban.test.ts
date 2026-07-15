@@ -1,5 +1,15 @@
 import { Keypair } from "@stellar/stellar-sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("./stellar", () => ({
+  config: {
+    rpcUrl: "https://soroban-testnet.stellar.org",
+    paymentTrackerContractId: "CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB",
+    paymentStatsContractId: "CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM",
+    paymentTokenContractId: "CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB"
+  }
+}));
+
 import { normalizeBatchFormValues, parseContractError, validateCreateBatchInput } from "./soroban";
 
 const sender = Keypair.random().publicKey();
