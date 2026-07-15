@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractclient, contracterror, contractimpl, contracttype, symbol_short, Address,
-    Env, String, Symbol, Vec,
+    contract, contractclient, contracterror, contractevent, contractimpl, contracttype, Address,
+    Env, String, Vec,
 };
 
 #[contractclient(name = "TokenClient")]
@@ -72,6 +72,39 @@ pub enum TrackerError {
     AlreadyRefunded = 8,
 }
 
+#[contractevent(topics = ["batch", "created"], data_format = "single-value")]
+pub struct BatchCreatedEvent {
+    id: u64,
+}
+
+#[contractevent(topics = ["batch", "funded"], data_format = "single-value")]
+pub struct BatchFundedEvent {
+    id: u64,
+}
+
+#[contractevent(topics = ["pay", "sent"], data_format = "single-value")]
+pub struct PaymentSentEvent {
+    #[topic]
+    id: u64,
+    #[topic]
+    index: u32,
+    tx_ref: String,
+}
+
+#[contractevent(topics = ["pay", "failed"], data_format = "single-value")]
+pub struct PaymentFailedEvent {
+    #[topic]
+    id: u64,
+    #[topic]
+    index: u32,
+    reason: String,
+}
+
+#[contractevent(topics = ["batch", "refunded"], data_format = "single-value")]
+pub struct BatchRefundedEvent {
+    payout: (u64, i128),
+}
+
 #[contract]
 pub struct PaymentTrackerContract;
 
@@ -134,8 +167,7 @@ impl PaymentTrackerContract {
 
         env.storage().persistent().set(&DataKey::Batch(id), &batch);
         env.storage().instance().set(&DataKey::NextId, &(id + 1));
-        env.events()
-            .publish((symbol_short!("batch"), Symbol::new(&env, "created")), id);
+        BatchCreatedEvent { id }.publish(&env);
         Ok(id)
     }
 
@@ -154,8 +186,7 @@ impl PaymentTrackerContract {
         );
         batch.funded = true;
         env.storage().persistent().set(&DataKey::Batch(id), &batch);
-        env.events()
-            .publish((symbol_short!("batch"), Symbol::new(&env, "funded")), id);
+        BatchFundedEvent { id }.publish(&env);
         Ok(())
     }
 
@@ -190,10 +221,7 @@ impl PaymentTrackerContract {
             .persistent()
             .set(&DataKey::Recipient(id, index), &payment);
         env.storage().persistent().set(&DataKey::Batch(id), &batch);
-        env.events().publish(
-            (symbol_short!("pay"), Symbol::new(&env, "sent"), id, index),
-            tx_ref,
-        );
+        PaymentSentEvent { id, index, tx_ref }.publish(&env);
         Ok(())
     }
 
@@ -212,10 +240,7 @@ impl PaymentTrackerContract {
             .persistent()
             .set(&DataKey::Recipient(id, index), &payment);
         env.storage().persistent().set(&DataKey::Batch(id), &batch);
-        env.events().publish(
-            (symbol_short!("pay"), Symbol::new(&env, "failed"), id, index),
-            reason,
-        );
+        PaymentFailedEvent { id, index, reason }.publish(&env);
         Ok(())
     }
 
@@ -249,10 +274,10 @@ impl PaymentTrackerContract {
         }
         batch.refunded = true;
         env.storage().persistent().set(&DataKey::Batch(id), &batch);
-        env.events().publish(
-            (symbol_short!("batch"), Symbol::new(&env, "refunded")),
-            (id, refund),
-        );
+        BatchRefundedEvent {
+            payout: (id, refund),
+        }
+        .publish(&env);
         Ok(refund)
     }
 
@@ -280,7 +305,7 @@ mod test {
     fn creates_and_reads_multi_address_batch() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register_contract(None, PaymentTrackerContract);
+        let contract_id = env.register(PaymentTrackerContract, ());
         let client = PaymentTrackerContractClient::new(&env, &contract_id);
 
         let sender = Address::generate(&env);
@@ -313,7 +338,7 @@ mod test {
     fn rejects_mismatched_recipients_and_amounts() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register_contract(None, PaymentTrackerContract);
+        let contract_id = env.register(PaymentTrackerContract, ());
         let client = PaymentTrackerContractClient::new(&env, &contract_id);
 
         let result = client.try_create_batch(
@@ -332,7 +357,7 @@ mod test {
     fn marks_individual_payment_failed() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register_contract(None, PaymentTrackerContract);
+        let contract_id = env.register(PaymentTrackerContract, ());
         let client = PaymentTrackerContractClient::new(&env, &contract_id);
         let recipient = Address::generate(&env);
         let id = client.create_batch(

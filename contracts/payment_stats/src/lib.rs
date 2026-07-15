@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, Env};
 
 #[contracttype]
 pub enum DataKey {
@@ -11,6 +11,13 @@ pub enum DataKey {
 
 #[contract]
 pub struct PaymentStatsContract;
+
+#[contractevent(topics = ["stats"], data_format = "single-value")]
+pub struct PaymentRecordedEvent {
+    #[topic]
+    recipient: Address,
+    totals: (i128, u32),
+}
 
 #[contractimpl]
 impl PaymentStatsContract {
@@ -29,10 +36,11 @@ impl PaymentStatsContract {
 
         env.storage().persistent().set(&total_key, &next_total);
         env.storage().persistent().set(&count_key, &next_count);
-        env.events().publish(
-            (Symbol::new(&env, "stats"), recipient),
-            (next_total, next_count),
-        );
+        PaymentRecordedEvent {
+            recipient,
+            totals: (next_total, next_count),
+        }
+        .publish(&env);
         (next_total, next_count)
     }
 
@@ -60,7 +68,7 @@ mod test {
     fn records_recipient_payment_stats() {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register_contract(None, PaymentStatsContract);
+        let contract_id = env.register(PaymentStatsContract, ());
         let client = PaymentStatsContractClient::new(&env, &contract_id);
         let tracker = Address::generate(&env);
         let recipient = Address::generate(&env);
