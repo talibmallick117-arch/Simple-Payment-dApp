@@ -1,5 +1,11 @@
+import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
-import { normalizeBatchFormValues } from "./soroban";
+import { normalizeBatchFormValues, parseContractError, validateCreateBatchInput } from "./soroban";
+
+const sender = Keypair.random().publicKey();
+const recipient = Keypair.random().publicKey();
+const tokenContract = "CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB";
+const statsContract = "CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM";
 
 describe("normalizeBatchFormValues", () => {
   it("falls back to a single recipient and amount when the form is empty", () => {
@@ -14,5 +20,48 @@ describe("normalizeBatchFormValues", () => {
 
     expect(result.recipients).toEqual(["GONE", "GTWO"]);
     expect(result.amounts).toEqual(["10", "20"]);
+  });
+
+  it("rejects invalid recipient addresses before building the transaction", () => {
+    const result = validateCreateBatchInput({
+      sender,
+      token: tokenContract,
+      statsContract,
+      recipients: ["not-a-stellar-address"],
+      amounts: ["10"]
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.message).toMatch(/invalid recipient address/i);
+    }
+  });
+
+  it("rejects non-positive or non-integer amounts", () => {
+    const result = validateCreateBatchInput({
+      sender,
+      token: tokenContract,
+      statsContract,
+      recipients: [recipient],
+      amounts: ["0"]
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.message).toMatch(/positive whole number/i);
+    }
+  });
+
+  it("maps txBadSeq errors to a readable message", () => {
+    const result = parseContractError({
+      result: {
+        _switch: {
+          name: "txBadSeq",
+          value: -5
+        }
+      }
+    });
+
+    expect(result).toBe("Transaction sequence conflict. Please retry with a fresh transaction.");
   });
 });

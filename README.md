@@ -120,7 +120,20 @@ VITE_STELLAR_NETWORK=testnet
 VITE_STELLAR_RPC_URL=https://soroban-testnet.stellar.org
 VITE_PAYMENT_TRACKER_CONTRACT_ID=CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB
 VITE_PAYMENT_STATS_CONTRACT_ID=CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM
+VITE_PAYMENT_TOKEN_CONTRACT_ID=CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
 ```
+
+`VITE_PAYMENT_TOKEN_CONTRACT_ID` points to the Testnet Stellar Asset Contract for the native asset. The app will not create batches until that value is set.
+
+If you need to recreate it from scratch on a fresh environment, use the Stellar CLI:
+
+```bash
+stellar keys generate deployer --network testnet --fund
+stellar contract asset deploy --asset native --source-account deployer --network testnet --alias payment_token
+stellar contract id asset --asset native --network testnet
+```
+
+The last command prints the exact contract ID to copy into `frontend/.env.local`.
 
 ## CI/CD
 

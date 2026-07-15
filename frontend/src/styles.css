@@ -246,8 +246,7 @@ h1 {
   width: 36px;
 }
 
-.bounty,
-.event {
+.bounty {
   border-radius: 8px;
   display: flex;
   gap: 16px;
@@ -281,12 +280,256 @@ h1 {
 }
 
 .event {
+  border: 1px solid #dfe6df;
+  border-radius: 12px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 56px minmax(220px, 1.2fr) minmax(260px, 1.4fr);
   margin: 0;
+  padding: 20px;
+  box-shadow: 0 1px 2px rgba(23, 32, 29, 0.04);
+  transition: box-shadow 200ms ease, transform 200ms ease, border-color 200ms ease;
+  align-items: flex-start;
 }
 
-.event strong {
-  color: #52615e;
-  font-size: 0.82rem;
+.event > * {
+  min-width: 0;
+}
+
+.event:hover {
+  border-color: rgba(22, 163, 74, 0.2);
+  box-shadow: 0 10px 24px rgba(23, 32, 29, 0.12);
+  transform: translateY(-1px);
+}
+
+.eventIcon {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  grid-column: 1;
+  flex-shrink: 0;
+  height: 44px;
+  justify-content: center;
+  margin-top: 0;
+  width: 44px;
+}
+
+.eventIcon--created {
+  background: #e6f7eb;
+  color: #15803d;
+}
+
+.eventIcon--funded {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.eventIcon--sent {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.eventIcon--refunded {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.eventBadge {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.eventBadge--created {
+  background: #e6f7eb;
+  color: #15803d;
+}
+
+.eventBadge--funded {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.eventBadge--sent {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.eventBadge--refunded {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.eventMetaGrid {
+  display: grid;
+  gap: 10px 16px;
+  grid-column: 3;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0;
+  align-self: start;
+}
+
+.eventMetaGrid > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.eventLabel {
+  color: #65716e;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.eventMetaGrid strong {
+  color: #17201d;
+  font-size: 0.92rem;
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eventFooter {
+  align-items: end;
+  display: flex;
+  grid-column: 2;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 0;
+}
+
+.eventFootnote,
+.eventTimestamp {
+  color: #65716e;
+  font-size: 0.8rem;
+}
+
+.eventTimestamp {
+  margin-left: auto;
+  text-align: right;
+}
+
+.event--created {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fef9 100%);
+  border-left: 4px solid #16a34a;
+}
+
+.event--funded {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+  border-left: 4px solid #0284c7;
+}
+
+.event--sent {
+  background: linear-gradient(180deg, #ffffff 0%, #fffaf4 100%);
+  border-left: 4px solid #ea580c;
+}
+
+.event--refunded {
+  background: linear-gradient(180deg, #ffffff 0%, #fff7f7 100%);
+  border-left: 4px solid #dc2626;
+}
+
+.eventInfo {
+  display: grid;
+  gap: 8px;
+  grid-column: 2;
+  min-width: 0;
+}
+
+.eventTitleRow {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.eventTitleWrap {
+  align-items: flex-start;
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.eventTitle {
+  color: #17201d;
+  display: block;
+  flex: 1 1 180px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.eventBatchLabel {
+  color: #65716e;
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.35;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.eventBadge {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.eventLabel {
+  color: #65716e;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.eventMetaGrid strong {
+  color: #17201d;
+  font-size: 0.92rem;
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eventFooter {
+  align-items: end;
+  display: flex;
+  gap: 12px;
+  grid-column: 2;
+  justify-content: space-between;
+  margin-top: 0;
+}
+
+.eventFootnote,
+.eventTimestamp {
+  color: #65716e;
+  font-size: 0.8rem;
+}
+
+.eventTimestamp {
+  margin-left: auto;
+  text-align: right;
 }
 
 .error,
@@ -348,6 +591,51 @@ h1 {
   .event {
     align-items: start;
     flex-direction: column;
+  }
+
+  .eventHeader,
+  .eventFooter {
+    width: 100%;
+  }
+
+  .event {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .eventIcon,
+  .eventInfo,
+  .eventMetaGrid {
+    grid-column: auto;
+    width: 100%;
+  }
+
+  .eventInfo {
+    gap: 6px;
+  }
+
+  .eventTitleRow {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .eventTitleWrap {
+    width: 100%;
+  }
+
+  .eventBatchLabel {
+    margin-left: 0;
+    white-space: normal;
+  }
+
+  .eventMetaGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .eventFooter {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .bountyMeta {

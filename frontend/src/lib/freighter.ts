@@ -24,6 +24,7 @@ export type WalletConnectionResult =
 export type WalletSession = {
   address: string;
   networkPassphrase: string;
+  connected: boolean;
 };
 
 function formatFreighterError(error: unknown) {
@@ -80,7 +81,6 @@ export async function connectWallet(): Promise<WalletConnectionResult> {
   }
 
   const networkDetails = await getNetworkDetails();
-  console.log("Freighter network details:", networkDetails);
 
   if (networkDetails.error) {
     return {
@@ -92,11 +92,6 @@ export async function connectWallet(): Promise<WalletConnectionResult> {
   }
 
   const expectedPassphrase = Networks.TESTNET;
-  console.log("Freighter network comparison:", {
-    network: networkDetails.network,
-    networkPassphrase: networkDetails.networkPassphrase,
-    expectedPassphrase
-  });
 
   const networkMatches =
     networkDetails.network === "TESTNET" ||
@@ -130,10 +125,40 @@ export async function connectWallet(): Promise<WalletConnectionResult> {
 }
 
 export async function getActiveWalletAddress() {
+  const session = await getActiveWalletSession();
+  return session.address;
+}
+
+export async function getActiveWalletSession(): Promise<WalletSession> {
   const status = await isConnected();
-  if (!status.isConnected || status.error) return "";
-  const response = await getAddress();
-  return response.error ? "" : response.address;
+  if (status.error || !status.isConnected) {
+    return { address: "", networkPassphrase: "", connected: false };
+  }
+
+  const addressResponse = await getAddress();
+  if (addressResponse.error || !addressResponse.address) {
+    return { address: "", networkPassphrase: "", connected: false };
+  }
+
+  const networkDetails = await getNetworkDetails();
+  if (networkDetails.error) {
+    return { address: addressResponse.address, networkPassphrase: "", connected: false };
+  }
+
+  const networkMatches =
+    networkDetails.network === "TESTNET" ||
+    networkDetails.networkPassphrase === Networks.TESTNET ||
+    networkDetails.network.toUpperCase() === "TESTNET";
+
+  if (!networkMatches) {
+    return { address: addressResponse.address, networkPassphrase: "", connected: false };
+  }
+
+  return {
+    address: addressResponse.address,
+    networkPassphrase: networkDetails.networkPassphrase,
+    connected: true
+  };
 }
 
 export async function signTransactionWithFreighter(

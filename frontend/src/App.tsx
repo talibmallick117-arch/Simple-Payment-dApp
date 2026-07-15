@@ -6,33 +6,39 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  RefreshCcw,
   Send,
   ShieldCheck,
   Wallet
 } from "lucide-react";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { connectWallet, getActiveWalletAddress } from "./lib/freighter";
+import { connectWallet, getActiveWalletSession } from "./lib/freighter";
 import {
   createBatchOnContract,
   fundBatchOnContract,
   loadBatchFromContract,
   markFailedOnContract,
   markSentOnContract,
-  normalizeBatchFormValues,
+  validateCreateBatchInput,
   refundPendingOnContract,
+  type CreateBatchStage,
   type BatchSummary
 } from "./lib/soroban";
+import { getRecentEvents, type MarketEvent } from "./lib/events";
 import { buildStellarExpertAccountUrl, copyTextToClipboard, shortenAddress } from "./lib/wallet";
-import { config, getRecentEvents, type MarketEvent } from "./lib/stellar";
+import { config } from "./lib/stellar";
 
 export function App() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isBatchLoading, setIsBatchLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [walletAddress, setWalletAddress] = useState("");
-  const [walletNetworkPassphrase, setWalletNetworkPassphrase] = useState("");
+  const [walletSession, setWalletSession] = useState({
+    address: "",
+    networkPassphrase: "",
+    connected: false
+  });
   const [isConnecting, setIsConnecting] = useState(false);
   const [walletError, setWalletError] = useState("");
   const [walletNotice, setWalletNotice] = useState("");
@@ -41,19 +47,32 @@ export function App() {
   const [batch, setBatch] = useState<BatchSummary | null>(null);
   const [batchIdInput, setBatchIdInput] = useState("1");
   const [memoInput, setMemoInput] = useState("July contractor payouts");
-  const [tokenInput, setTokenInput] = useState("");
+  const [tokenInput, setTokenInput] = useState(config.paymentTokenContractId);
   const [statsContractInput, setStatsContractInput] = useState(config.paymentStatsContractId);
   const [recipientsInput, setRecipientsInput] = useState("");
   const [amountsInput, setAmountsInput] = useState("");
+  const [createBatchPhase, setCreateBatchPhase] = useState<CreateBatchStage | "idle">("idle");
   const walletMenuRef = useRef<HTMLDivElement | null>(null);
+  const createBatchInFlightRef = useRef(false);
+  const hasEventDecodeIssue = events.some((event) => event.decodeIssue);
+  const isDev = import.meta.env.DEV;
+
+  function devLog(message: string, details?: Record<string, unknown>) {
+    if (!isDev) return;
+    if (details) {
+      console.debug(message, details);
+      return;
+    }
+    console.debug(message);
+  }
 
   useEffect(() => {
     let alive = true;
 
     async function hydrateWallet() {
-      const address = await getActiveWalletAddress();
-      if (alive && address) {
-        setWalletAddress(address);
+      const session = await getActiveWalletSession();
+      if (alive) {
+        setWalletSession(session);
       }
     }
 
@@ -116,7 +135,7 @@ export function App() {
   }, []);
 
   const configured = useMemo(
-    () => Boolean(config.paymentTrackerContractId && config.paymentStatsContractId),
+    () => Boolean(config.paymentTrackerContractId && config.paymentStatsContractId && config.paymentTokenContractId),
     []
   );
 
@@ -150,14 +169,16 @@ export function App() {
     try {
       const result = await connectWallet();
       if (result.error) {
-        setWalletAddress("");
-        setWalletNetworkPassphrase("");
+        setWalletSession({ address: "", networkPassphrase: "", connected: false });
         setWalletError(result.error);
         return;
       }
 
-      setWalletAddress(result.address);
-      setWalletNetworkPassphrase(result.networkPassphrase);
+      setWalletSession({
+        address: result.address,
+        networkPassphrase: result.networkPassphrase,
+        connected: Boolean(result.address)
+      });
       setIsWalletMenuOpen(false);
       setWalletNotice("Wallet connected. You can now sign Soroban transactions.");
     } catch (err) {
@@ -168,7 +189,7 @@ export function App() {
   }
 
   async function handleWalletButtonClick() {
-    if (!walletAddress) {
+    if (!walletSession.address || !walletSession.connected) {
       await handleConnectWallet();
       return;
     }
@@ -180,7 +201,7 @@ export function App() {
 
   async function handleCopyAddress() {
     try {
-      await copyTextToClipboard(walletAddress);
+      await copyTextToClipboard(walletSession.address);
       setWalletNotice("Address copied to clipboard.");
     } catch (err) {
       setWalletError(err instanceof Error ? err.message : "Unable to copy wallet address.");
@@ -190,7 +211,7 @@ export function App() {
   }
 
   function handleOpenExplorer() {
-    window.open(buildStellarExpertAccountUrl(walletAddress), "_blank", "noopener,noreferrer");
+    window.open(buildStellarExpertAccountUrl(walletSession.address), "_blank", "noopener,noreferrer");
     setIsWalletMenuOpen(false);
   }
 
@@ -199,10 +220,14 @@ export function App() {
   }
 
   async function handleCreateBatch() {
-    console.log("Create Batch clicked");
-    console.log("[app] createBatch start", {
-      walletAddress,
-      walletNetworkPassphrase,
+    if (createBatchInFlightRef.current || createBatchPhase !== "idle") {
+      setWalletError("Create Batch is already in progress. Please wait for the current transaction to finish.");
+      return;
+    }
+
+    devLog("[app] handleCreateBatch start", {
+      address: walletSession.address,
+      networkPassphrase: walletSession.networkPassphrase,
       memoInput,
       tokenInput,
       statsContractInput,
@@ -211,52 +236,104 @@ export function App() {
       isSubmitting
     });
 
-    if (!walletAddress || !walletNetworkPassphrase) {
-      setWalletError("Connect your Freighter wallet before creating a batch.");
+    const activeSession = walletSession.address || walletSession.networkPassphrase
+      ? walletSession
+      : await getActiveWalletSession();
+    if (activeSession.address || activeSession.networkPassphrase) {
+      setWalletSession(activeSession);
+    }
+
+    devLog("[app] validation", {
+      address: activeSession.address,
+      networkPassphrase: activeSession.networkPassphrase,
+      walletError,
+      walletNotice
+    });
+
+    if (!activeSession.address || !activeSession.networkPassphrase) {
+      const message = "Connect your Freighter wallet before creating a batch.";
+      devLog("[app] validation failed", {
+        address: walletSession.address,
+        networkPassphrase: walletSession.networkPassphrase
+      });
+      setWalletError(message);
+      setWalletNotice("");
+      setError(message);
       return;
     }
 
+    const resolvedToken = tokenInput.trim() || config.paymentTokenContractId.trim();
+    const resolvedStatsContract = statsContractInput.trim() || config.paymentStatsContractId.trim();
+    const recipients = recipientsInput.split(",").map((item) => item.trim()).filter(Boolean);
+    const amounts = amountsInput.split(",").map((item) => item.trim()).filter(Boolean);
+
+    const validation = validateCreateBatchInput({
+      sender: activeSession.address,
+      token: resolvedToken,
+      statsContract: resolvedStatsContract,
+      recipients,
+      amounts
+    });
+
+    if (!validation.success) {
+      setWalletError(validation.message);
+      setWalletNotice("");
+      setError(validation.message);
+      return;
+    }
+
+    createBatchInFlightRef.current = true;
     setIsSubmitting(true);
+    setCreateBatchPhase("building");
     setWalletError("");
     setWalletNotice("");
 
     try {
-      const { recipients, amounts } = normalizeBatchFormValues(
-        recipientsInput,
-        amountsInput,
-        walletAddress,
-        "1"
-      );
       const result = await createBatchOnContract({
-        sender: walletAddress,
-        token: tokenInput || "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-        statsContract: statsContractInput || config.paymentStatsContractId,
+        sender: activeSession.address,
+        token: resolvedToken,
+        statsContract: resolvedStatsContract,
         memo: memoInput,
         recipients,
         amounts,
-        walletAddress,
-        networkPassphrase: walletNetworkPassphrase
+        walletAddress: activeSession.address,
+        networkPassphrase: activeSession.networkPassphrase
+      }, {
+        onStage: setCreateBatchPhase
       });
 
       if (!result.success) {
-        setWalletError(result.message || "The batch could not be created.");
+        const message = result.message || "The batch could not be created.";
+        devLog("[app] createBatch failure", result);
+        setWalletError(message);
+        setWalletNotice("");
         return;
       }
 
       setWalletNotice("Batch created successfully. Refreshing the latest batch state.");
       const nextBatchId = result.id ?? Number(batchIdInput || 1);
       setBatchIdInput(String(nextBatchId));
-      await loadBatchFromContract(nextBatchId);
-      setBatch(await loadBatchFromContract(nextBatchId));
+      const nextBatch = await loadBatchFromContract(nextBatchId);
+      setBatch(nextBatch);
+      setMemoInput("July contractor payouts");
+      setTokenInput(config.paymentTokenContractId);
+      setStatsContractInput(config.paymentStatsContractId);
+      setRecipientsInput("");
+      setAmountsInput("");
     } catch (err) {
-      setWalletError(err instanceof Error ? err.message : "Unable to create the batch.");
+      const message = err instanceof Error ? err.message : "Unable to create the batch.";
+      devLog("[app] catch", { message });
+      setWalletError(message);
+      setWalletNotice("");
     } finally {
       setIsSubmitting(false);
+      setCreateBatchPhase("idle");
+      createBatchInFlightRef.current = false;
     }
   }
 
   async function handleFundBatch() {
-    if (!walletAddress || !walletNetworkPassphrase) {
+    if (!walletSession.address || !walletSession.networkPassphrase) {
       setWalletError("Connect your Freighter wallet before funding a batch.");
       return;
     }
@@ -266,7 +343,7 @@ export function App() {
     setWalletNotice("");
 
     try {
-      const result = await fundBatchOnContract({ batchId: Number(batchIdInput), walletAddress, networkPassphrase: walletNetworkPassphrase });
+      const result = await fundBatchOnContract({ batchId: Number(batchIdInput), walletAddress: walletSession.address, networkPassphrase: walletSession.networkPassphrase });
       if (!result.success) {
         setWalletError(result.message || "The batch could not be funded.");
         return;
@@ -281,7 +358,7 @@ export function App() {
   }
 
   async function handleMarkSent(index: number) {
-    if (!walletAddress || !walletNetworkPassphrase) {
+    if (!walletSession.address || !walletSession.networkPassphrase) {
       setWalletError("Connect your Freighter wallet before updating a payment.");
       return;
     }
@@ -291,7 +368,7 @@ export function App() {
     setWalletNotice("");
 
     try {
-      const result = await markSentOnContract({ batchId: Number(batchIdInput), index, txRef: `ui-${Date.now()}`, walletAddress, networkPassphrase: walletNetworkPassphrase });
+      const result = await markSentOnContract({ batchId: Number(batchIdInput), index, txRef: `ui-${Date.now()}`, walletAddress: walletSession.address, networkPassphrase: walletSession.networkPassphrase });
       if (!result.success) {
         setWalletError(result.message || "The payment could not be marked as sent.");
         return;
@@ -306,7 +383,7 @@ export function App() {
   }
 
   async function handleMarkFailed(index: number) {
-    if (!walletAddress || !walletNetworkPassphrase) {
+    if (!walletSession.address || !walletSession.networkPassphrase) {
       setWalletError("Connect your Freighter wallet before updating a payment.");
       return;
     }
@@ -316,7 +393,7 @@ export function App() {
     setWalletNotice("");
 
     try {
-      const result = await markFailedOnContract({ batchId: Number(batchIdInput), index, reason: "UI marked failed", walletAddress, networkPassphrase: walletNetworkPassphrase });
+      const result = await markFailedOnContract({ batchId: Number(batchIdInput), index, reason: "UI marked failed", walletAddress: walletSession.address, networkPassphrase: walletSession.networkPassphrase });
       if (!result.success) {
         setWalletError(result.message || "The payment could not be marked as failed.");
         return;
@@ -331,7 +408,7 @@ export function App() {
   }
 
   async function handleRefundPending() {
-    if (!walletAddress || !walletNetworkPassphrase) {
+    if (!walletSession.address || !walletSession.networkPassphrase) {
       setWalletError("Connect your Freighter wallet before refunding pending payments.");
       return;
     }
@@ -341,7 +418,7 @@ export function App() {
     setWalletNotice("");
 
     try {
-      const result = await refundPendingOnContract({ batchId: Number(batchIdInput), walletAddress, networkPassphrase: walletNetworkPassphrase });
+      const result = await refundPendingOnContract({ batchId: Number(batchIdInput), walletAddress: walletSession.address, networkPassphrase: walletSession.networkPassphrase });
       if (!result.success) {
         setWalletError(result.message || "Pending payments could not be refunded.");
         return;
@@ -355,7 +432,7 @@ export function App() {
     }
   }
 
-  const walletLabel = walletAddress ? shortenAddress(walletAddress) : "Connect wallet";
+  const walletLabel = walletSession.address ? shortenAddress(walletSession.address) : "Connect wallet";
 
   return (
     <main className="app">
@@ -373,14 +450,14 @@ export function App() {
             type="button"
             onClick={handleWalletButtonClick}
             disabled={isConnecting}
-            aria-haspopup={walletAddress ? "menu" : undefined}
-            aria-expanded={walletAddress ? isWalletMenuOpen : undefined}
+            aria-haspopup={walletSession.address ? "menu" : undefined}
+            aria-expanded={walletSession.address ? isWalletMenuOpen : undefined}
           >
             {isConnecting ? <Loader2 className="spin" size={18} /> : <Wallet size={18} />}
             {isConnecting ? "Connecting..." : walletLabel}
-            {walletAddress && !isConnecting && <ChevronDown size={16} />}
+            {walletSession.address && !isConnecting && <ChevronDown size={16} />}
           </button>
-          {walletAddress && isWalletMenuOpen && (
+          {walletSession.address && isWalletMenuOpen && (
             <div className="walletMenu" role="menu" aria-label="Wallet actions">
               <button className="walletMenuItem" type="button" onClick={handleCopyAddress} role="menuitem">
                 <Copy size={16} />
@@ -472,13 +549,17 @@ export function App() {
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                console.log("[app] Create Batch button clicked");
                 void handleCreateBatch();
               }}
-              disabled={isSubmitting}
+              disabled={isSubmitting || createBatchPhase !== "idle"}
             >
-              {isSubmitting ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-              Create batch
+              {isSubmitting || createBatchPhase !== "idle" ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
+              {createBatchPhase === "building" && "Building batch..."}
+              {createBatchPhase === "simulating" && "Simulating..."}
+              {createBatchPhase === "waiting_signature" && "Waiting for Freighter..."}
+              {createBatchPhase === "submitting" && "Submitting..."}
+              {createBatchPhase === "polling" && "Confirming..."}
+              {createBatchPhase === "idle" && "Create batch"}
             </button>
           </div>
 
@@ -523,15 +604,15 @@ export function App() {
             {isLoading ? <Loader2 className="spin" size={18} /> : <Clock size={18} />}
           </div>
           {error && <p className="error">{error}</p>}
+          {!error && hasEventDecodeIssue && (
+            <p className="notice">Some event details could not be decoded.</p>
+          )}
           {!error && !isLoading && events.length === 0 && (
             <p className="empty">No payment events found yet. The contract is connected, but no events have been emitted on testnet yet.</p>
           )}
           <div className="eventList">
             {events.map((event) => (
-              <div className="event" key={event.id}>
-                <span>{event.topic}</span>
-                <strong>Ledger {event.ledger}</strong>
-              </div>
+              <LiveEventCard key={event.id} event={event} />
             ))}
           </div>
         </div>
@@ -548,4 +629,71 @@ function StatusTile({ icon, label, value }: { icon: React.ReactNode; label: stri
       <strong>{value}</strong>
     </div>
   );
+}
+
+function LiveEventCard({ event }: { event: MarketEvent }) {
+  const tone = getEventTone(event.eventName);
+  const Icon = getEventIcon(event.eventName);
+  const batchNumberLabel = event.batchId !== undefined ? `${event.batchId}` : "N/A";
+  const senderLabel = event.sender ? shortenAddress(event.sender) : "N/A";
+  const recipientLabel = event.recipientCount !== undefined ? `${event.recipientCount}` : "N/A";
+  const amountLabel = event.amount ? `${event.amount} XLM` : "N/A";
+  const ledgerLabel = `${event.ledger}`;
+  const timestampLabel = event.timestamp ?? "N/A";
+  const batchDisplayLabel = event.batchId !== undefined ? `Batch #${batchNumberLabel}` : "Batch N/A";
+
+  return (
+    <article className={`event event--${tone}`} aria-label={event.eventName}>
+      <div className={`eventIcon eventIcon--${tone}`} aria-hidden="true">
+        <Icon size={18} />
+      </div>
+      <div className="eventInfo">
+        <div className="eventTitleRow">
+          <div className="eventTitleWrap">
+            <strong className="eventTitle">{event.eventName}</strong>
+            <span className={`eventBadge eventBadge--${tone}`}>{event.eventName}</span>
+          </div>
+          <p className="eventBatchLabel">{batchDisplayLabel}</p>
+        </div>
+      </div>
+      <div className="eventMetaGrid">
+        <div>
+          <span className="eventLabel">Sender</span>
+          <strong title={event.sender ?? ""}>{senderLabel}</strong>
+        </div>
+        <div>
+          <span className="eventLabel">Recipients</span>
+          <strong>{recipientLabel}</strong>
+        </div>
+        <div>
+          <span className="eventLabel">Amount</span>
+          <strong>{amountLabel}</strong>
+        </div>
+        <div>
+          <span className="eventLabel">Ledger</span>
+          <strong>{ledgerLabel}</strong>
+        </div>
+      </div>
+      <div className="eventFooter">
+        <span className="eventFootnote">Batch ID: {batchNumberLabel}</span>
+        <span className="eventTimestamp">{timestampLabel}</span>
+      </div>
+    </article>
+  );
+}
+
+function getEventTone(eventName: string) {
+  const lower = eventName.toLowerCase();
+  if (lower.includes("funded")) return "funded";
+  if (lower.includes("sent")) return "sent";
+  if (lower.includes("refund")) return "refunded";
+  return "created";
+}
+
+function getEventIcon(eventName: string) {
+  const lower = eventName.toLowerCase();
+  if (lower.includes("funded")) return Wallet;
+  if (lower.includes("sent")) return Send;
+  if (lower.includes("refund")) return RefreshCcw;
+  return CheckCircle2;
 }

@@ -5,6 +5,7 @@
     "frontend"
   ],
   "scripts": {
+    "dev": "npm run dev --workspace frontend",
     "test": "npm test --workspace frontend",
     "build": "npm run build --workspace frontend",
     "lint": "npm run lint --workspace frontend"

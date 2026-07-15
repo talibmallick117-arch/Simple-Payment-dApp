@@ -13,7 +13,8 @@ export const config = {
   network: import.meta.env.VITE_STELLAR_NETWORK ?? "testnet",
   rpcUrl,
   paymentTrackerContractId: contractId,
-  paymentStatsContractId: import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID ?? ""
+  paymentStatsContractId: import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID ?? "",
+  paymentTokenContractId: import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID ?? ""
 };
 
 export async function getRecentEvents(): Promise<MarketEvent[]> {
