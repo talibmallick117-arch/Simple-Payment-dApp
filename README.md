@@ -156,7 +156,7 @@ Fill these in after deployment:
 - Deployment network: Stellar Testnet
 - Deployment transaction hash:605260c75c44980fe4a9068c2b509e83d4066d4df9924ffa780e66fca2a4fcd6
 - Payment Stats contract address:CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM
-- Transaction hash: https://stellar.expert/explorer/testnet/account/GBODH3R6ZMWMXVOLC2MPPS5LMJMIJOPMUU4GLTDMKPQTRAK67BEQ7FH6
+- Transaction hash:2bebb5fa80111c499ab20f1bb866ec417d4019b67204223747f5b452449a978e
 - Demo video:
 
 
