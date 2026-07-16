@@ -2,6 +2,11 @@ import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./stellar", () => ({
+  normalizeContractId: (value: string | undefined) => (typeof value === "string" ? value.trim().replace(/^(['"])(.*)\1$/, "$2").trim() : ""),
+  isValidContractId: (value: string | undefined) =>
+    typeof value === "string" &&
+    Boolean(value.trim().replace(/^(['"])(.*)\1$/, "$2").trim()) &&
+    value.trim().replace(/^(['"])(.*)\1$/, "$2").trim().startsWith("C"),
   config: {
     rpcUrl: "https://soroban-testnet.stellar.org",
     paymentTrackerContractId: "CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB",
@@ -59,6 +64,22 @@ describe("normalizeBatchFormValues", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.message).toMatch(/positive whole number/i);
+    }
+  });
+
+  it("normalizes quoted contract IDs before validating them", () => {
+    const result = validateCreateBatchInput({
+      sender,
+      token: `  "${tokenContract}"  `,
+      statsContract: ` '${statsContract}' `,
+      recipients: [recipient],
+      amounts: ["10"]
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.token).toBe(tokenContract);
+      expect(result.statsContract).toBe(statsContract);
     }
   });
 

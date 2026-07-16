@@ -27,7 +27,7 @@ import {
 } from "./lib/soroban";
 import { getRecentEvents, type MarketEvent } from "./lib/events";
 import { buildStellarExpertAccountUrl, copyTextToClipboard, shortenAddress } from "./lib/wallet";
-import { config } from "./lib/stellar";
+import { config, normalizeContractId } from "./lib/stellar";
 
 export function App() {
   const [events, setEvents] = useState<MarketEvent[]>([]);
@@ -135,7 +135,14 @@ export function App() {
   }, []);
 
   const configured = useMemo(
-    () => Boolean(config.paymentTrackerContractId && config.paymentStatsContractId && config.paymentTokenContractId),
+    () =>
+      Boolean(
+        (config.paymentTrackerContractValid ?? Boolean(config.paymentTrackerContractId)) &&
+          (config.paymentStatsContractValid ?? Boolean(config.paymentStatsContractId)) &&
+          (config.paymentTokenContractValid ?? Boolean(config.paymentTokenContractId)) &&
+          config.rpcUrl &&
+          config.network
+      ),
     []
   );
 
@@ -153,8 +160,15 @@ export function App() {
       rpcHostname,
       network: config.network,
       trackerConfigured: Boolean(config.paymentTrackerContractId),
+      trackerValid: Boolean(config.paymentTrackerContractValid ?? config.paymentTrackerContractId),
       statsConfigured: Boolean(config.paymentStatsContractId),
+      statsValid: Boolean(config.paymentStatsContractValid ?? config.paymentStatsContractId),
+      statsContractLength: config.paymentStatsContractId.length,
+      statsContractLeadingWhitespace: /^\s/.test(config.paymentStatsContractId),
+      statsContractTrailingWhitespace: /\s$/.test(config.paymentStatsContractId),
+      statsContractWrappedQuotes: /^['"].*['"]$/.test(config.paymentStatsContractId),
       tokenConfigured: Boolean(config.paymentTokenContractId),
+      tokenValid: Boolean(config.paymentTokenContractValid ?? config.paymentTokenContractId),
       rpcConfigured: Boolean(config.rpcUrl),
       walletConnected: Boolean(walletSession.connected),
       transactionPhase: createBatchPhase
@@ -306,8 +320,8 @@ export function App() {
       return;
     }
 
-    const resolvedToken = tokenInput.trim() || config.paymentTokenContractId.trim();
-    const resolvedStatsContract = statsContractInput.trim() || config.paymentStatsContractId.trim();
+    const resolvedToken = normalizeContractId(tokenInput) || config.paymentTokenContractId;
+    const resolvedStatsContract = normalizeContractId(statsContractInput) || config.paymentStatsContractId;
     const recipients = recipientsInput.split(",").map((item) => item.trim()).filter(Boolean);
     const amounts = amountsInput.split(",").map((item) => item.trim()).filter(Boolean);
 

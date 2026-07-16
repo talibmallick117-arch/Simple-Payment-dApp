@@ -1,4 +1,5 @@
 import { rpc } from "@stellar/stellar-sdk";
+import { StrKey } from "@stellar/stellar-sdk";
 
 export type MarketEvent = {
   id: string;
@@ -12,12 +13,23 @@ const DEFAULT_PAYMENT_TRACKER_CONTRACT_ID = "CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFW
 const DEFAULT_PAYMENT_STATS_CONTRACT_ID = "CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM";
 const DEFAULT_PAYMENT_TOKEN_CONTRACT_ID = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 
-function normalizeEnvValue(value: string | undefined, fallback: string): string {
+export function normalizeEnvValue(value: string | undefined, fallback: string): string {
   const trimmed = typeof value === "string" ? value.trim() : "";
   if (!trimmed) return fallback;
 
   const unwrapped = trimmed.replace(/^(['"])(.*)\1$/, "$2").trim();
   return unwrapped || fallback;
+}
+
+export function normalizeContractId(value: string | undefined): string {
+  const normalized = normalizeEnvValue(value, "");
+  return normalized;
+}
+
+export function isValidContractId(value: string | undefined): boolean {
+  const normalized = normalizeContractId(value);
+  if (!normalized) return false;
+  return StrKey.isValidContract(normalized);
 }
 
 const rpcUrl = normalizeEnvValue(import.meta.env.VITE_STELLAR_RPC_URL, DEFAULT_RPC_URL);
@@ -27,8 +39,11 @@ export const config = {
   network: normalizeEnvValue(import.meta.env.VITE_STELLAR_NETWORK, DEFAULT_NETWORK),
   rpcUrl,
   paymentTrackerContractId: contractId,
+  paymentTrackerContractValid: isValidContractId(import.meta.env.VITE_PAYMENT_TRACKER_CONTRACT_ID),
   paymentStatsContractId: normalizeEnvValue(import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID, DEFAULT_PAYMENT_STATS_CONTRACT_ID),
-  paymentTokenContractId: normalizeEnvValue(import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID, DEFAULT_PAYMENT_TOKEN_CONTRACT_ID)
+  paymentStatsContractValid: isValidContractId(import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID),
+  paymentTokenContractId: normalizeEnvValue(import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID, DEFAULT_PAYMENT_TOKEN_CONTRACT_ID),
+  paymentTokenContractValid: isValidContractId(import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID)
 };
 
 export async function getRecentEvents(): Promise<MarketEvent[]> {

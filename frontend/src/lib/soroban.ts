@@ -1,7 +1,7 @@
 import { Account, StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
 import { signTransactionWithFreighter } from "./freighter";
-import { config } from "./stellar";
+import { config, isValidContractId, normalizeContractId } from "./stellar";
 import { Client as PaymentTrackerClient, networks } from "./contract-bindings/src";
 
 export type PaymentStatus = "Pending" | "Sent" | "Failed" | "Refunded";
@@ -176,12 +176,12 @@ function isPositiveIntegerString(value: string): boolean {
 
 export function validateCreateBatchInput(input: CreateBatchValidationInput): CreateBatchValidationResult {
   const sender = input.sender.trim();
-  const token = input.token.trim();
-  const statsContract = input.statsContract.trim();
+  const token = normalizeContractId(input.token);
+  const statsContract = normalizeContractId(input.statsContract);
   const recipients = input.recipients.map((item) => item.trim()).filter(Boolean);
   const amounts = input.amounts.map((item) => item.trim()).filter(Boolean);
 
-  if (!config.paymentTrackerContractId.trim() || !StrKey.isValidContract(config.paymentTrackerContractId.trim())) {
+  if (!isValidContractId(config.paymentTrackerContractId)) {
     return {
       success: false,
       message: "The Payment Tracker contract ID is missing or invalid."
@@ -198,14 +198,14 @@ export function validateCreateBatchInput(input: CreateBatchValidationInput): Cre
   if (!token) {
     return { success: false, message: "A token contract address is required." };
   }
-  if (!StrKey.isValidContract(token)) {
+  if (!isValidContractId(token)) {
     return { success: false, message: "The token contract ID is not valid." };
   }
 
   if (!statsContract) {
     return { success: false, message: "A stats contract address is required." };
   }
-  if (!StrKey.isValidContract(statsContract)) {
+  if (!isValidContractId(statsContract)) {
     return { success: false, message: "The stats contract ID is not valid." };
   }
 

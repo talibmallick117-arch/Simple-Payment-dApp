@@ -29,6 +29,7 @@ const mockBatch = {
 };
 
 vi.mock("./lib/stellar", () => ({
+  normalizeContractId: (value: string | undefined) => (typeof value === "string" ? value.trim().replace(/^(['"])(.*)\1$/, "$2").trim() : ""),
   config: {
     network: "testnet",
     rpcUrl: "https://soroban-testnet.stellar.org",
