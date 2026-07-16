@@ -1,5 +1,6 @@
-import { Account, StrKey, TransactionBuilder } from "@stellar/stellar-sdk";
+import { Account, StrKey } from "@stellar/stellar-sdk";
 import { Server } from "@stellar/stellar-sdk/rpc";
+import type { AssembledTransaction, SignTransaction } from "@stellar/stellar-sdk/contract";
 import { signTransactionWithFreighter } from "./freighter";
 import { config, isValidContractId, normalizeContractId } from "./stellar";
 import { Client as PaymentTrackerClient, networks } from "./contract-bindings/src";
@@ -62,6 +63,11 @@ export type CreateBatchValidationResult =
 
 const rpcServer = new Server(config.rpcUrl, { allowHttp: false });
 const isDev = import.meta.env.DEV;
+
+type SignAndSendableTransaction<T> = Pick<AssembledTransaction<T>, "result" | "simulation" | "signAndSend"> & {
+  sendTransactionResponse?: { hash?: string };
+  getTransactionResponse?: { txHash?: string };
+};
 
 function devLog(message: string, details?: Record<string, unknown>) {
   if (!isDev) return;
@@ -217,6 +223,71 @@ function mapPaymentStatus(value: unknown): PaymentStatus {
 
 function isPositiveIntegerString(value: string): boolean {
   return /^\d+$/.test(value) && BigInt(value) > 0n;
+}
+
+function describeArgTypes(args: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(args).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? "array" : value === null ? "null" : typeof value
+    ])
+  );
+}
+
+function getFinalTransactionHash<T>(transaction: SignAndSendableTransaction<T>): string {
+  return transaction.sendTransactionResponse?.hash ?? transaction.getTransactionResponse?.txHash ?? "";
+}
+
+async function signAndSubmitAssembledTransaction<T>(
+  actionName: string,
+  contractMethod: string,
+  assembled: SignAndSendableTransaction<T>,
+  input: { walletAddress: string; networkPassphrase: string },
+  stage?: (value: CreateBatchStage) => void
+): Promise<{ result: T; hash: string }> {
+  const effectiveNetworkPassphrase = input.networkPassphrase || networks.testnet.networkPassphrase;
+
+  devLog("[soroban] transaction assembly ready", {
+    actionName,
+    contractMethod,
+    sourceAccount: input.walletAddress,
+    network: effectiveNetworkPassphrase,
+    transactionPhase: "simulating",
+    hasSimulation: Boolean(assembled.simulation)
+  });
+
+  stage?.("waiting_signature");
+  devLog("[soroban] waiting for signature", {
+    actionName,
+    contractMethod,
+    sourceAccount: input.walletAddress,
+    network: effectiveNetworkPassphrase,
+    transactionPhase: "waiting_signature"
+  });
+
+  const sent = await assembled.signAndSend({
+    signTransaction: (xdr, options) =>
+      signTransactionWithFreighter(xdr, {
+        address: options?.address ?? input.walletAddress,
+        networkPassphrase: options?.networkPassphrase ?? effectiveNetworkPassphrase,
+        connected: Boolean(input.walletAddress)
+      })
+  });
+
+  const hash = getFinalTransactionHash(sent as unknown as SignAndSendableTransaction<T>);
+  devLog("[soroban] transaction submitted", {
+    actionName,
+    contractMethod,
+    sourceAccount: input.walletAddress,
+    network: effectiveNetworkPassphrase,
+    transactionPhase: "submitting",
+    finalTransactionHash: hash
+  });
+
+  return {
+    result: sent.result,
+    hash
+  };
 }
 
 export function validateCreateBatchInput(input: CreateBatchValidationInput): CreateBatchValidationResult {
@@ -378,6 +449,8 @@ export async function createBatchOnContract(input: {
   onStage?: (stage: CreateBatchStage) => void;
 }): Promise<ContractActionResult> {
   try {
+    const actionName = "Create Batch";
+    const contractMethod = "create_batch";
     const validation = validateCreateBatchInput({
       sender: input.sender,
       token: input.token,
@@ -391,11 +464,24 @@ export async function createBatchOnContract(input: {
     const { sender, token, statsContract, recipients: normalizedRecipients, amounts: normalizedAmounts } = validation;
     const memo = input.memo.trim();
     const sequenceConflictMessage = "Transaction sequence conflict. Please retry with a fresh transaction.";
+    const argTypes = describeArgTypes({
+      sender,
+      token,
+      stats_contract: statsContract,
+      memo,
+      recipients: normalizedRecipients,
+      amounts: normalizedAmounts
+    });
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       hooks?.onStage?.("building");
-      devLog("[soroban] before account load", {
+      devLog("[soroban] action start", {
+        actionName,
+        contractMethod,
         sourcePublicKey: sender,
+        network: input.networkPassphrase || networks.testnet.networkPassphrase,
+        transactionPhase: "building",
+        argTypes,
         attempt
       });
 
@@ -403,12 +489,16 @@ export async function createBatchOnContract(input: {
 
       const client = createTrackerClient(sender);
       devLog("[soroban] before simulation", {
+        actionName,
+        contractMethod,
         contractId: config.paymentTrackerContractId,
         sender,
         recipients: normalizedRecipients,
         amounts: normalizedAmounts,
         memo,
         walletAddress: input.walletAddress,
+        network: input.networkPassphrase || networks.testnet.networkPassphrase,
+        transactionPhase: "simulating",
         attempt
       });
 
@@ -419,19 +509,13 @@ export async function createBatchOnContract(input: {
         memo,
         recipients: normalizedRecipients,
         amounts: normalizedAmounts
-      }, { simulate: false });
+      });
 
       hooks?.onStage?.("simulating");
-      const assembled = await tx.simulate();
-      const xdr = assembled.built?.toXDR() ?? "";
-      if (!xdr) {
-        return { success: false, message: "Unable to prepare the transaction for signing." };
-      }
-
+      const assembled = tx as unknown as SignAndSendableTransaction<{ unwrap?: () => bigint | number | string } | undefined>;
       const createdBatchId = (() => {
         try {
-          const result = assembled.result as { unwrap?: () => bigint | number | string } | undefined;
-          const value = result?.unwrap?.();
+          const value = assembled.result?.unwrap?.();
           return value === undefined ? undefined : Number(value);
         } catch {
           return undefined;
@@ -439,83 +523,37 @@ export async function createBatchOnContract(input: {
       })();
 
       devLog("[soroban] built transaction", {
+        actionName,
+        contractMethod,
         sourcePublicKey: sender,
-        builtSequence: assembled.built?.sequence ?? "",
-        xdrLength: xdr.length,
+        network: input.networkPassphrase || networks.testnet.networkPassphrase,
+        transactionPhase: "simulating",
+        simulationResult: assembled.result ?? null,
         attempt
       });
 
-      hooks?.onStage?.("waiting_signature");
-      devLog("[soroban] before Freighter signing", {
-        sourcePublicKey: sender,
-        xdrLength: xdr.length,
-        attempt
-      });
-      const signed = await signTransactionWithFreighter(xdr, {
-        address: input.walletAddress,
-        networkPassphrase: input.networkPassphrase || networks.testnet.networkPassphrase,
-        connected: Boolean(input.walletAddress)
-      });
-      if (signed.error) {
-        const message = parseContractError(signed.error);
-        return { success: false, message };
-      }
       hooks?.onStage?.("submitting");
-      const transaction = TransactionBuilder.fromXDR(signed.signedTxXdr, input.networkPassphrase || networks.testnet.networkPassphrase);
-      const hashBytes = transaction.hash() as Uint8Array;
-      const hash = Array.from(hashBytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-      devLog("[soroban] submission timestamp", {
-        sourcePublicKey: sender,
-        submissionTimestamp: Date.now(),
-        hash,
-        attempt
-      });
-      const response = await rpcServer.sendTransaction(transaction as never);
-      if (response.status === "ERROR") {
-        devLog("[soroban] sendTransaction error response", {
-          response
-        });
-        const message = parseContractError(response.errorResult ?? "The batch creation transaction failed.");
-        if (message === sequenceConflictMessage && attempt === 0) {
-          devLog("[soroban] sequence conflict, rebuilding transaction", {
-            sourcePublicKey: sender,
-            hash
-          });
-          continue;
-        }
-        return { success: false, message };
-      }
-      if (response.status === "DUPLICATE") {
-        devLog("[soroban] duplicate submission detected", {
-          sourcePublicKey: sender,
-          hash: response.hash
-        });
+      const submitted = await signAndSubmitAssembledTransaction(
+        actionName,
+        contractMethod,
+        assembled,
+        {
+          walletAddress: input.walletAddress,
+          networkPassphrase: input.networkPassphrase
+        },
+        hooks?.onStage
+      );
+      if (!submitted.hash) {
+        return { success: false, message: "The transaction could not be submitted." };
       }
 
-      hooks?.onStage?.("polling");
-      const transactionStatus = await rpcServer.pollTransaction(response.hash, {
-        attempts: 20
-      });
-      if (transactionStatus.status === "FAILED") {
-        devLog("[soroban] pollTransaction failed response", {
-          transactionStatus
-        });
-        const message = parseContractError(transactionStatus.resultXdr ?? transactionStatus);
-        if (message === sequenceConflictMessage && attempt === 0) {
-          devLog("[soroban] sequence conflict during polling, rebuilding transaction", {
-            sourcePublicKey: sender,
-            hash: transactionStatus.txHash
-          });
-          continue;
-        }
-        return { success: false, message };
-      }
-      if (transactionStatus.status === "NOT_FOUND") {
-        return { success: false, message: "Transaction was submitted but is still pending on the network. Please try again shortly." };
-      }
       devLog("[soroban] transaction confirmed", {
+        actionName,
+        contractMethod,
         sourcePublicKey: sender,
-        hash: transactionStatus.txHash,
+        network: input.networkPassphrase || networks.testnet.networkPassphrase,
+        transactionPhase: "polling",
+        hash: submitted.hash,
         attempt
       });
       return { success: true, message: "Batch created successfully.", id: createdBatchId };
@@ -529,6 +567,8 @@ export async function createBatchOnContract(input: {
 
 export async function fundBatchOnContract(input: { batchId: number; walletAddress: string; networkPassphrase: string }): Promise<ContractActionResult> {
   try {
+    const actionName = "Fund Batch";
+    const contractMethod = "fund_batch";
     const client = new PaymentTrackerClient({
       contractId: config.paymentTrackerContractId,
       networkPassphrase: networks.testnet.networkPassphrase,
@@ -537,17 +577,20 @@ export async function fundBatchOnContract(input: { batchId: number; walletAddres
       signTransaction: undefined
     });
     await loadFreshSourceAccount(input.walletAddress);
-    const tx = await client.fund_batch({ id: BigInt(input.batchId) as never }, { simulate: true });
-    const assembled = await tx.simulate();
-    const signed = await signTransactionWithFreighter(assembled.built?.toXDR() ?? "", {
-      address: input.walletAddress,
-      networkPassphrase: input.networkPassphrase || networks.testnet.networkPassphrase,
-      connected: Boolean(input.walletAddress)
+    const tx = await client.fund_batch({ id: BigInt(input.batchId) as never });
+    devLog("[soroban] write action", {
+      actionName,
+      contractMethod,
+      sourceAccount: input.walletAddress,
+      network: input.networkPassphrase || networks.testnet.networkPassphrase,
+      transactionPhase: "simulating",
+      argTypes: describeArgTypes({ id: input.batchId })
     });
-    if (signed.error) return { success: false, message: parseContractError(signed.error) };
-    const transaction = TransactionBuilder.fromXDR(signed.signedTxXdr, input.networkPassphrase || networks.testnet.networkPassphrase);
-    const response = await rpcServer.sendTransaction(transaction as never);
-    return parseRpcResponseStatus(response, "Batch funded successfully.");
+    const submitted = await signAndSubmitAssembledTransaction(actionName, contractMethod, tx as unknown as SignAndSendableTransaction<unknown>, {
+      walletAddress: input.walletAddress,
+      networkPassphrase: input.networkPassphrase
+    });
+    return { success: true, message: "Batch funded successfully.", id: input.batchId };
   } catch (error) {
     return { success: false, message: parseContractError(error) };
   }
@@ -555,6 +598,8 @@ export async function fundBatchOnContract(input: { batchId: number; walletAddres
 
 export async function markSentOnContract(input: { batchId: number; index: number; txRef: string; walletAddress: string; networkPassphrase: string }): Promise<ContractActionResult> {
   try {
+    const actionName = "Mark Sent";
+    const contractMethod = "mark_sent";
     const client = new PaymentTrackerClient({
       contractId: config.paymentTrackerContractId,
       networkPassphrase: networks.testnet.networkPassphrase,
@@ -563,17 +608,20 @@ export async function markSentOnContract(input: { batchId: number; index: number
       signTransaction: undefined
     });
     await loadFreshSourceAccount(input.walletAddress);
-    const tx = await client.mark_sent({ id: BigInt(input.batchId) as never, index: input.index as never, tx_ref: input.txRef }, { simulate: true });
-    const assembled = await tx.simulate();
-    const signed = await signTransactionWithFreighter(assembled.built?.toXDR() ?? "", {
-      address: input.walletAddress,
-      networkPassphrase: input.networkPassphrase || networks.testnet.networkPassphrase,
-      connected: Boolean(input.walletAddress)
+    const tx = await client.mark_sent({ id: BigInt(input.batchId) as never, index: input.index as never, tx_ref: input.txRef });
+    devLog("[soroban] write action", {
+      actionName,
+      contractMethod,
+      sourceAccount: input.walletAddress,
+      network: input.networkPassphrase || networks.testnet.networkPassphrase,
+      transactionPhase: "simulating",
+      argTypes: describeArgTypes({ id: input.batchId, index: input.index, tx_ref: input.txRef })
     });
-    if (signed.error) return { success: false, message: parseContractError(signed.error) };
-    const transaction = TransactionBuilder.fromXDR(signed.signedTxXdr, input.networkPassphrase || networks.testnet.networkPassphrase);
-    const response = await rpcServer.sendTransaction(transaction as never);
-    return parseRpcResponseStatus(response, "Payment marked as sent.");
+    await signAndSubmitAssembledTransaction(actionName, contractMethod, tx as unknown as SignAndSendableTransaction<unknown>, {
+      walletAddress: input.walletAddress,
+      networkPassphrase: input.networkPassphrase
+    });
+    return { success: true, message: "Payment marked as sent." };
   } catch (error) {
     return { success: false, message: parseContractError(error) };
   }
@@ -581,6 +629,8 @@ export async function markSentOnContract(input: { batchId: number; index: number
 
 export async function markFailedOnContract(input: { batchId: number; index: number; reason: string; walletAddress: string; networkPassphrase: string }): Promise<ContractActionResult> {
   try {
+    const actionName = "Mark Failed";
+    const contractMethod = "mark_failed";
     const client = new PaymentTrackerClient({
       contractId: config.paymentTrackerContractId,
       networkPassphrase: networks.testnet.networkPassphrase,
@@ -589,17 +639,20 @@ export async function markFailedOnContract(input: { batchId: number; index: numb
       signTransaction: undefined
     });
     await loadFreshSourceAccount(input.walletAddress);
-    const tx = await client.mark_failed({ id: BigInt(input.batchId) as never, index: input.index as never, reason: input.reason }, { simulate: true });
-    const assembled = await tx.simulate();
-    const signed = await signTransactionWithFreighter(assembled.built?.toXDR() ?? "", {
-      address: input.walletAddress,
-      networkPassphrase: input.networkPassphrase || networks.testnet.networkPassphrase,
-      connected: Boolean(input.walletAddress)
+    const tx = await client.mark_failed({ id: BigInt(input.batchId) as never, index: input.index as never, reason: input.reason });
+    devLog("[soroban] write action", {
+      actionName,
+      contractMethod,
+      sourceAccount: input.walletAddress,
+      network: input.networkPassphrase || networks.testnet.networkPassphrase,
+      transactionPhase: "simulating",
+      argTypes: describeArgTypes({ id: input.batchId, index: input.index, reason: input.reason })
     });
-    if (signed.error) return { success: false, message: parseContractError(signed.error) };
-    const transaction = TransactionBuilder.fromXDR(signed.signedTxXdr, input.networkPassphrase || networks.testnet.networkPassphrase);
-    const response = await rpcServer.sendTransaction(transaction as never);
-    return parseRpcResponseStatus(response, "Payment marked as failed.");
+    await signAndSubmitAssembledTransaction(actionName, contractMethod, tx as unknown as SignAndSendableTransaction<unknown>, {
+      walletAddress: input.walletAddress,
+      networkPassphrase: input.networkPassphrase
+    });
+    return { success: true, message: "Payment marked as failed." };
   } catch (error) {
     return { success: false, message: parseContractError(error) };
   }
@@ -607,6 +660,8 @@ export async function markFailedOnContract(input: { batchId: number; index: numb
 
 export async function refundPendingOnContract(input: { batchId: number; walletAddress: string; networkPassphrase: string }): Promise<ContractActionResult> {
   try {
+    const actionName = "Refund Pending";
+    const contractMethod = "refund_pending";
     const client = new PaymentTrackerClient({
       contractId: config.paymentTrackerContractId,
       networkPassphrase: networks.testnet.networkPassphrase,
@@ -615,17 +670,20 @@ export async function refundPendingOnContract(input: { batchId: number; walletAd
       signTransaction: undefined
     });
     await loadFreshSourceAccount(input.walletAddress);
-    const tx = await client.refund_pending({ id: BigInt(input.batchId) as never }, { simulate: true });
-    const assembled = await tx.simulate();
-    const signed = await signTransactionWithFreighter(assembled.built?.toXDR() ?? "", {
-      address: input.walletAddress,
-      networkPassphrase: input.networkPassphrase || networks.testnet.networkPassphrase,
-      connected: Boolean(input.walletAddress)
+    const tx = await client.refund_pending({ id: BigInt(input.batchId) as never });
+    devLog("[soroban] write action", {
+      actionName,
+      contractMethod,
+      sourceAccount: input.walletAddress,
+      network: input.networkPassphrase || networks.testnet.networkPassphrase,
+      transactionPhase: "simulating",
+      argTypes: describeArgTypes({ id: input.batchId })
     });
-    if (signed.error) return { success: false, message: parseContractError(signed.error) };
-    const transaction = TransactionBuilder.fromXDR(signed.signedTxXdr, input.networkPassphrase || networks.testnet.networkPassphrase);
-    const response = await rpcServer.sendTransaction(transaction as never);
-    return parseRpcResponseStatus(response, "Refund processed successfully.");
+    await signAndSubmitAssembledTransaction(actionName, contractMethod, tx as unknown as SignAndSendableTransaction<unknown>, {
+      walletAddress: input.walletAddress,
+      networkPassphrase: input.networkPassphrase
+    });
+    return { success: true, message: "Refund processed successfully." };
   } catch (error) {
     return { success: false, message: parseContractError(error) };
   }

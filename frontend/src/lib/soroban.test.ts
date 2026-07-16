@@ -1,6 +1,30 @@
 import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 
+const mockCreateBatchTx = {
+  result: {
+    unwrap: () => 5n
+  },
+  simulation: {
+    result: { ok: true }
+  },
+  signAndSend: vi.fn(async ({ signTransaction }: { signTransaction: (transactionXdr: string, opts?: { address?: string; networkPassphrase?: string }) => Promise<{ signedTxXdr: string; signerAddress?: string; error?: unknown }> }) => {
+    const signed = await signTransaction("BASE_XDR", {
+      address: "GBTESTSIGNER",
+      networkPassphrase: "Test SDF Network ; September 2015"
+    });
+
+    expect(signed.signedTxXdr).toBe("SIGNED_XDR");
+    return {
+      result: {
+        unwrap: () => 5n
+      },
+      sendTransactionResponse: { hash: "abc123" },
+      getTransactionResponse: { txHash: "abc123" }
+    };
+  })
+};
+
 vi.mock("./stellar", () => ({
   normalizeContractId: (value: string | undefined) => (typeof value === "string" ? value.trim().replace(/^(['"])(.*)\1$/, "$2").trim() : ""),
   isValidContractId: (value: string | undefined) =>
@@ -15,7 +39,31 @@ vi.mock("./stellar", () => ({
   }
 }));
 
-import { normalizeBatchFormValues, parseContractError, validateCreateBatchInput } from "./soroban";
+vi.mock("./freighter", () => ({
+  signTransactionWithFreighter: vi.fn(async () => ({
+    signedTxXdr: "SIGNED_XDR",
+    signerAddress: "GBTESTSIGNER"
+  }))
+}));
+
+vi.mock("@stellar/stellar-sdk/rpc", () => ({
+  Server: vi.fn().mockImplementation(() => ({
+    getAccount: vi.fn(async () => ({ sequence: "1" }))
+  }))
+}));
+
+vi.mock("./contract-bindings/src", () => ({
+  Client: vi.fn().mockImplementation(() => ({
+    create_batch: vi.fn(async () => mockCreateBatchTx)
+  })),
+  networks: {
+    testnet: {
+      networkPassphrase: "Test SDF Network ; September 2015"
+    }
+  }
+}));
+
+import { createBatchOnContract, normalizeBatchFormValues, parseContractError, validateCreateBatchInput } from "./soroban";
 
 const sender = Keypair.random().publicKey();
 const recipient = Keypair.random().publicKey();
@@ -109,5 +157,22 @@ describe("normalizeBatchFormValues", () => {
     });
 
     expect(result).toBe("The transaction is malformed. Please rebuild and try again.");
+  });
+
+  it("submits Create Batch through signAndSend without rebuilding the XDR manually", async () => {
+    const result = await createBatchOnContract({
+      sender,
+      token: tokenContract,
+      statsContract,
+      memo: "test batch",
+      recipients: [recipient],
+      amounts: ["10"],
+      walletAddress: sender,
+      networkPassphrase: "Test SDF Network ; September 2015"
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.id).toBe(5);
+    expect(mockCreateBatchTx.signAndSend).toHaveBeenCalledTimes(1);
   });
 });
