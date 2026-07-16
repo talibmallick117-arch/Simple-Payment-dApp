@@ -140,15 +140,33 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
+    const rpcHostname = (() => {
+      try {
+        return new URL(config.rpcUrl).hostname;
+      } catch {
+        return "invalid";
+      }
+    })();
 
-    console.debug("frontend config flags", {
+    const diagnostics = {
+      hostname: window.location.hostname,
+      rpcHostname,
+      network: config.network,
       trackerConfigured: Boolean(config.paymentTrackerContractId),
       statsConfigured: Boolean(config.paymentStatsContractId),
       tokenConfigured: Boolean(config.paymentTokenContractId),
-      rpcConfigured: Boolean(config.rpcUrl)
-    });
-  }, []);
+      rpcConfigured: Boolean(config.rpcUrl),
+      walletConnected: Boolean(walletSession.connected),
+      transactionPhase: createBatchPhase
+    };
+
+    if (import.meta.env.DEV) {
+      console.debug("frontend config flags", diagnostics);
+      return;
+    }
+
+    console.info("frontend config flags", diagnostics);
+  }, [createBatchPhase, walletSession.connected]);
 
   async function loadBatchFromCurrentId() {
     const id = Number(batchIdInput || 1);
