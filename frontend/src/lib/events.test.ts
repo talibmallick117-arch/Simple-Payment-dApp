@@ -1,35 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-  const scValToNative = vi.fn((value: unknown) => {
-    if (value && typeof value === "object" && (value as { fail?: boolean }).fail) {
-      throw new Error("Bad union switch: 4");
-    }
-    return (value as { native?: unknown }).native;
-  });
-
   const getLatestLedger = vi.fn(async () => ({ sequence: 100 }));
   const getEvents = vi.fn(async () => ({ latestLedger: 100, cursor: "", events: [] as Array<Record<string, unknown>> }));
 
-  return { scValToNative, getLatestLedger, getEvents };
+  return { getLatestLedger, getEvents };
 });
 
-vi.mock("@stellar/stellar-base", () => ({
-  scValToNative: mocks.scValToNative
-}));
-
 vi.mock("@stellar/stellar-sdk", () => ({
-    rpc: {
-      Server: class {
-        getLatestLedger = mocks.getLatestLedger;
-        getEvents = mocks.getEvents;
+  rpc: {
+    Server: class {
+      getLatestLedger = mocks.getLatestLedger;
+      getEvents = mocks.getEvents;
 
-        constructor(url: string) {
-          void url;
-        }
+      constructor(url: string) {
+        void url;
       }
     }
-  }));
+  }
+}));
 
 vi.mock("./soroban", () => ({
   loadBatchFromContract: vi.fn()
@@ -48,38 +37,43 @@ import { getRecentEvents } from "./events";
 import { loadBatchFromContract } from "./soroban";
 
 type MockScVal = {
-  native?: unknown;
-  fail?: boolean;
   switch: () => { name?: string; value?: number };
-  u64?: () => bigint;
   str?: () => string;
+  sym?: () => string;
+  i32?: () => number;
+  u32?: () => number;
+  u64?: () => bigint;
+  i64?: () => bigint;
+  timepoint?: () => bigint;
+  duration?: () => bigint;
+  error?: () => unknown;
+  address?: () => { toString?: () => string } | string;
+  vec?: () => unknown[];
+  map?: () => Array<{ key?: unknown; val?: unknown }>;
+  bytes?: () => Uint8Array;
+  instance?: () => unknown;
 };
 
-function mockScVal(native: unknown, name: string, value: number): MockScVal {
+function mockScVal(name: string, value: number, methods: Partial<MockScVal> = {}): MockScVal {
   return {
-    native,
     switch: () => ({ name, value }),
-    str: () => String(native)
+    ...methods
   };
 }
 
-function mockBadU64(native: unknown): MockScVal {
-  return {
-    native,
-    fail: true,
-    switch: () => ({ name: "scvU64", value: 4 }),
-    u64: () => BigInt(native as number)
-  };
+function mockStringScVal(text: string): MockScVal {
+  return mockScVal("scvSymbol", 15, { sym: () => text, str: () => text });
+}
+
+function mockI32ScVal(value: number): MockScVal {
+  return mockScVal("scvI32", 4, { i32: () => value });
+}
+
+function mockUnsupportedScVal(): MockScVal {
+  return mockScVal("scvContractInstance", 19, { instance: () => ({}) });
 }
 
 beforeEach(() => {
-  mocks.scValToNative.mockReset();
-  mocks.scValToNative.mockImplementation((value: unknown) => {
-    if (value && typeof value === "object" && (value as { fail?: boolean }).fail) {
-      throw new Error("Bad union switch: 4");
-    }
-    return (value as { native?: unknown }).native;
-  });
   mocks.getLatestLedger.mockReset();
   mocks.getLatestLedger.mockResolvedValue({ sequence: 100 });
   mocks.getEvents.mockReset();
@@ -87,7 +81,7 @@ beforeEach(() => {
 });
 
 describe("event decoding", () => {
-  it("decodes a supported event even when the ScVal union variant is not handled by scValToNative", async () => {
+  it("decodes an I32 event value without throwing and preserves the rendered fields", async () => {
     mocks.getEvents.mockResolvedValueOnce({
       latestLedger: 100,
       cursor: "",
@@ -97,8 +91,8 @@ describe("event decoding", () => {
           ledger: 100,
           ledgerClosedAt: "2026-07-15T10:00:00Z",
           contractId: "CBTESTTRACKER",
-          topic: [mockScVal("batch", "scvSymbol", 14), mockScVal("created", "scvSymbol", 14)],
-          value: mockBadU64(7)
+          topic: [mockStringScVal("batch"), mockStringScVal("created")],
+          value: mockI32ScVal(7)
         }
       ]
     });
@@ -126,12 +120,12 @@ describe("event decoding", () => {
       batchId: 7,
       sender: "GBOD6K5Q4GQ3R7ZL4QJ2P2L7KQ4S7K6R8H6M4QJ7FH6M4QJ7FH6M4QJ7",
       recipientCount: 2,
-      amount: "70"
+      amount: "70",
+      decodeIssue: false
     });
-    expect(events[0].decodeIssue).toBe(true);
   });
 
-  it("falls back safely when topic and value decoding both fail", async () => {
+  it("skips unsupported ScVal variants without breaking the rest of the event", async () => {
     mocks.getEvents.mockResolvedValueOnce({
       latestLedger: 100,
       cursor: "",
@@ -141,8 +135,8 @@ describe("event decoding", () => {
           ledger: 101,
           ledgerClosedAt: "2026-07-15T10:01:00Z",
           contractId: "CBTESTTRACKER",
-          topic: [mockBadU64(1), mockBadU64(2)],
-          value: mockBadU64(9)
+          topic: [mockStringScVal("batch"), mockStringScVal("created")],
+          value: mockUnsupportedScVal()
         }
       ]
     });
@@ -151,7 +145,7 @@ describe("event decoding", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
-      eventName: "Contract event",
+      eventName: "Batch created",
       ledger: 101
     });
     expect(events[0].batchId).toBeUndefined();

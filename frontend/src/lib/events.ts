@@ -1,4 +1,3 @@
-import { scValToNative } from "@stellar/stellar-base";
 import { rpc } from "@stellar/stellar-sdk";
 import { loadBatchFromContract } from "./soroban";
 import { config } from "./stellar";
@@ -25,6 +24,11 @@ type RpcEvent = {
   contractId?: unknown;
 };
 
+type ScValSwitchInfo = {
+  name: string;
+  value: number;
+};
+
 const isDev = import.meta.env.DEV;
 
 function devLog(message: string, details?: Record<string, unknown>) {
@@ -37,65 +41,153 @@ function devLog(message: string, details?: Record<string, unknown>) {
 }
 
 function describeScValType(value: unknown): string {
-  if (!value || typeof value !== "object") return typeof value;
-  const maybeSwitch = (value as { switch?: () => { name?: string; value?: number } }).switch?.();
-  if (!maybeSwitch) return "unknown";
-  const name = typeof maybeSwitch.name === "string" ? maybeSwitch.name : "";
-  const numeric = typeof maybeSwitch.value === "number" ? maybeSwitch.value : undefined;
+  const maybeSwitch = getScValSwitchInfo(value);
+  if (!maybeSwitch) return typeof value;
+  const { name, value: numeric } = maybeSwitch;
   if (name && numeric !== undefined) return `${name}(${numeric})`;
   if (name) return name;
   if (numeric !== undefined) return `${numeric}`;
   return "unknown";
 }
 
-function decodeScValFallback(value: unknown): unknown {
-  if (!value || typeof value !== "object") return undefined;
+function getScValSwitchInfo(value: unknown): ScValSwitchInfo | null {
+  if (!value || typeof value !== "object") return null;
+  const switchFn = (value as { switch?: () => { name?: string; value?: number } }).switch;
+  if (typeof switchFn !== "function") return null;
+
+  const maybeSwitch = switchFn();
+  if (!maybeSwitch || typeof maybeSwitch !== "object") return null;
+
+  const name = typeof maybeSwitch.name === "string" ? maybeSwitch.name : "";
+  const numeric = typeof maybeSwitch.value === "number" ? maybeSwitch.value : Number.NaN;
+  if (!Number.isFinite(numeric)) return name ? { name, value: -1 } : null;
+  return { name, value: numeric };
+}
+
+function toBytesText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map((item) => String(item)).join(", ");
+  if (value instanceof Uint8Array) return Array.from(value).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (value && typeof value === "object" && "toString" in value && typeof (value as { toString?: () => string }).toString === "function") {
+    return (value as { toString: () => string }).toString();
+  }
+  return toText(value);
+}
+
+function decodeScValByType(value: unknown, context: string, event: RpcEvent): { value: unknown; failed: boolean } {
+  const switchInfo = getScValSwitchInfo(value);
+  devLog("[events] decode scval", {
+    context,
+    contractId: event.contractId ?? "unknown",
+    ledger: event.ledger,
+    switchName: switchInfo?.name ?? "unknown",
+    switchValue: switchInfo?.value ?? "unknown"
+  });
+
+  if (!switchInfo) {
+    return { value: undefined, failed: true };
+  }
+
   const raw = value as Record<string, unknown>;
-  const maybeSwitch = (value as { switch?: () => { name?: string; value?: number } }).switch?.();
-  const switchName = maybeSwitch && typeof maybeSwitch.name === "string" ? maybeSwitch.name : "";
+  const decodeMethod = (
+    method:
+      | "b"
+      | "u32"
+      | "i32"
+      | "u64"
+      | "i64"
+      | "timepoint"
+      | "duration"
+      | "u128"
+      | "i128"
+      | "u256"
+      | "i256"
+      | "str"
+      | "sym"
+      | "bytes"
+      | "vec"
+      | "map"
+      | "address"
+      | "error"
+  ) => {
+    const fn = raw[method];
+    return typeof fn === "function" ? (fn as () => unknown)() : undefined;
+  };
 
-  if (typeof raw.u64 === "function") return Number((raw.u64 as () => bigint | number)());
-  if (typeof raw.i64 === "function") return Number((raw.i64 as () => bigint | number)());
-  if (typeof raw.u32 === "function") return Number((raw.u32 as () => number)());
-  if (typeof raw.i32 === "function") return Number((raw.i32 as () => number)());
-  if (typeof raw.str === "function") return (raw.str as () => string)();
-  if (typeof raw.sym === "function") return (raw.sym as () => string)();
-  if (typeof raw.bool === "function") return Boolean((raw.bool as () => boolean)());
-  if (typeof raw.address === "function") {
-    const address = (raw.address as () => { toString?: () => string } | string)();
-    return typeof address === "string" ? address : address?.toString?.() ?? "";
+  switch (switchInfo.value) {
+    case 0:
+      return { value: decodeMethod("b"), failed: false };
+    case 1:
+      return { value: undefined, failed: false };
+    case 2: {
+      const errorValue = decodeMethod("error");
+      return { value: errorValue ?? "error", failed: false };
+    }
+    case 3:
+    case 4:
+      return { value: decodeMethod(switchInfo.value === 3 ? "u32" : "i32"), failed: false };
+    case 5:
+      return { value: decodeMethod("u64"), failed: false };
+    case 6:
+      return { value: decodeMethod("i64"), failed: false };
+    case 7:
+      return { value: decodeMethod("timepoint"), failed: false };
+    case 8:
+      return { value: decodeMethod("duration"), failed: false };
+    case 9:
+    case 10:
+    case 11:
+    case 12:
+      return {
+        value: decodeMethod(switchInfo.value === 9 ? "u128" : switchInfo.value === 10 ? "i128" : switchInfo.value === 11 ? "u256" : "i256"),
+        failed: false
+      };
+    case 13:
+      return { value: toBytesText(decodeMethod("bytes")), failed: false };
+    case 14:
+      return { value: decodeMethod("str"), failed: false };
+    case 15:
+      return { value: decodeMethod("sym"), failed: false };
+    case 16: {
+      const vec = decodeMethod("vec");
+      if (!Array.isArray(vec)) return { value: [], failed: true };
+      let failed = false;
+      const decoded = vec.map((item, index) => {
+        const next = decodeScValByType(item, `${context}.vec[${index}]`, event);
+        failed ||= next.failed;
+        return next.value;
+      });
+      return { value: decoded, failed };
+    }
+    case 17: {
+      const map = decodeMethod("map");
+      if (!Array.isArray(map)) return { value: [], failed: true };
+      let failed = false;
+      const decoded = map.map((entry, index) => {
+        const typedEntry = entry as { key?: unknown; val?: unknown };
+        const key = decodeScValByType(typedEntry.key, `${context}.map[${index}].key`, event);
+        const val = decodeScValByType(typedEntry.val, `${context}.map[${index}].val`, event);
+        failed ||= key.failed || val.failed;
+        return [key.value, val.value];
+      });
+      return { value: decoded, failed };
+    }
+    case 18:
+      return { value: toText(decodeMethod("address")), failed: false };
+    default:
+      devLog("[events] unsupported scval union variant", {
+        context,
+        contractId: event.contractId ?? "unknown",
+        ledger: event.ledger,
+        switchName: switchInfo.name,
+        switchValue: switchInfo.value
+      });
+      return { value: undefined, failed: true };
   }
-  if (typeof raw.bytes === "function") return (raw.bytes as () => unknown)();
-  if (typeof raw.vec === "function") {
-    const vec = raw.vec as () => unknown[];
-    return vec().map((item) => decodeScValFallback(item) ?? toText(item));
-  }
-  if (typeof raw.map === "function") {
-    const map = raw.map as () => Array<{ key?: unknown; val?: unknown }>;
-    return map().map((entry) => [decodeScValFallback(entry.key) ?? toText(entry.key), decodeScValFallback(entry.val) ?? toText(entry.val)]);
-  }
-
-  if (switchName.toLowerCase().includes("u64") && typeof raw.u64 === "function") return Number((raw.u64 as () => bigint | number)());
-  if (switchName.toLowerCase().includes("i64") && typeof raw.i64 === "function") return Number((raw.i64 as () => bigint | number)());
-  if (switchName.toLowerCase().includes("u32") && typeof raw.u32 === "function") return Number((raw.u32 as () => number)());
-  if (switchName.toLowerCase().includes("i32") && typeof raw.i32 === "function") return Number((raw.i32 as () => number)());
-
-  return undefined;
 }
 
 function safeScValToNative(value: unknown, context: string, event: RpcEvent): { value: unknown; failed: boolean } {
-  try {
-    return { value: scValToNative(value as never), failed: false };
-  } catch (error) {
-    devLog("[events] decode failure", {
-      context,
-      contractId: event.contractId ?? "unknown",
-      ledger: event.ledger,
-      rawType: describeScValType(value),
-      error: error instanceof Error ? error.message : String(error)
-    });
-    return { value: decodeScValFallback(value), failed: true };
-  }
+  return decodeScValByType(value, context, event);
 }
 
 function toText(value: unknown): string {
@@ -109,6 +201,13 @@ function toText(value: unknown): string {
   }
 
   if (value && typeof value === "object") {
+    const maybeToString = (value as { toString?: () => string }).toString;
+    if (typeof maybeToString === "function") {
+      const text = maybeToString.call(value);
+      if (text && text !== "[object Object]") {
+        return text;
+      }
+    }
     const entries = Object.entries(value as Record<string, unknown>);
     if (entries.length === 0) return "";
     return entries.map(([key, item]) => `${key}: ${toText(item)}`).join(", ");
@@ -153,11 +252,15 @@ function extractNumericId(value: unknown): number | undefined {
   return undefined;
 }
 
-function decodeTopics(event: RpcEvent) {
-  return event.topic.map((entry, index) => {
+function decodeTopics(event: RpcEvent): { values: string[]; failed: boolean } {
+  let failed = false;
+  const values = event.topic.map((entry, index) => {
     const decoded = safeScValToNative(entry, `topic[${index}]`, event);
+    failed ||= decoded.failed;
     return toText(decoded.value);
   });
+
+  return { values, failed };
 }
 
 function getEventName(group: string, action: string) {
@@ -189,17 +292,18 @@ async function buildEventRow(
   event: RpcEvent,
   batchCache: Map<number, BatchCacheEntry>
 ): Promise<MarketEvent> {
-  const topicValues = decodeTopics(event);
+  const topicDecode = decodeTopics(event);
+  const topicValues = topicDecode.values;
   const group = topicValues[0] ?? "event";
   const action = topicValues[1] ?? "event";
   const decodedValue = safeScValToNative(event.value, "value", event);
-  const batchId = getBatchId(group, action, topicValues, decodedValue.value ?? event.value);
+  const batchId = getBatchId(group, action, topicValues, decodedValue.value);
   const batch = typeof batchId === "number" ? await getBatchSummary(batchId, batchCache) : null;
   const timestamp = event.ledgerClosedAt ? new Date(event.ledgerClosedAt).toLocaleString() : undefined;
   let amount: string | undefined;
   let recipientCount: number | undefined;
   let sender: string | undefined;
-  const decodeIssue = decodedValue.failed;
+  const decodeIssue = topicDecode.failed || decodedValue.failed;
 
   if (batch) {
     amount = batch.totalAmount;
@@ -265,13 +369,22 @@ async function getBatchSummary(batchId: number, batchCache: Map<number, BatchCac
     return batchCache.get(batchId) ?? null;
   }
 
-  let batch = await loadBatchFromContract(batchId);
-  if (!batch) {
-    await new Promise((resolve) => globalThis.setTimeout(resolve, 250));
-    batch = await loadBatchFromContract(batchId);
+  try {
+    let batch = await loadBatchFromContract(batchId);
+    if (!batch) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 250));
+      batch = await loadBatchFromContract(batchId);
+    }
+    batchCache.set(batchId, batch);
+    return batch;
+  } catch (error) {
+    devLog("[events] batch summary lookup failed", {
+      batchId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    batchCache.set(batchId, null);
+    return null;
   }
-  batchCache.set(batchId, batch);
-  return batch;
 }
 
 export async function getRecentEvents(): Promise<MarketEvent[]> {
