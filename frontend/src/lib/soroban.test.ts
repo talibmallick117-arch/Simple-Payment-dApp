@@ -95,4 +95,19 @@ describe("normalizeBatchFormValues", () => {
 
     expect(result).toBe("Transaction sequence conflict. Please retry with a fresh transaction.");
   });
+
+  it("maps txMalformed transaction results to a readable message", () => {
+    const result = parseContractError({
+      _attributes: {
+        result: {
+          _switch: {
+            name: "txMalformed",
+            value: 16
+          }
+        }
+      }
+    });
+
+    expect(result).toBe("The transaction is malformed. Please rebuild and try again.");
+  });
 });

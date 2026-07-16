@@ -92,6 +92,14 @@ export async function loadFreshSourceAccount(publicKey: string): Promise<Account
 }
 
 export function parseContractError(error: unknown): string {
+  const txResult = extractTransactionResult(error);
+  if (txResult === "txMalformed") {
+    return "The transaction is malformed. Please rebuild and try again.";
+  }
+  if (txResult === "txBadSeq") {
+    return "Transaction sequence conflict. Please retry with a fresh transaction.";
+  }
+
   if (error && typeof error === "object") {
     const maybeMessage = (error as { message?: unknown }).message;
     if (typeof maybeMessage === "string" && maybeMessage.trim()) {
@@ -108,17 +116,10 @@ export function parseContractError(error: unknown): string {
       return maybeDetails;
     }
 
-    try {
-      const serialized = JSON.stringify(error);
-      if (serialized && serialized !== "{}") {
-        const lowerSerialized = serialized.toLowerCase();
-        if (lowerSerialized.includes("txbadseq") || lowerSerialized.includes("badseq") || lowerSerialized.includes("\"value\":-5")) {
-          return "Transaction sequence conflict. Please retry with a fresh transaction.";
-        }
-        return serialized;
-      }
-    } catch {
-      // fall through
+    if (isDev) {
+      devLog("[soroban] raw transaction error", {
+        error
+      });
     }
   }
 
@@ -133,11 +134,55 @@ export function parseContractError(error: unknown): string {
   if (lower.includes("missingbatch")) return "The requested batch could not be found.";
   if (lower.includes("missingrecipient")) return "The requested recipient payment could not be found.";
   if (lower.includes("unauthorized")) return "The connected wallet is not authorized to perform this action.";
+  if (lower.includes("txmalformed")) return "The transaction is malformed. Please rebuild and try again.";
   if (lower.includes("txbadseq") || lower.includes("badseq") || lower.includes("\"value\":-5")) {
     return "Transaction sequence conflict. Please retry with a fresh transaction.";
   }
 
   return text || "The contract returned an unexpected error.";
+}
+
+function extractTransactionResult(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+
+  const visited = new Set<unknown>();
+  const queue: unknown[] = [value];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+
+    const record = current as Record<string, unknown>;
+    const switchCandidate = record._switch;
+    if (switchCandidate && typeof switchCandidate === "object") {
+      const candidate = switchCandidate as { name?: unknown; value?: unknown };
+      if (typeof candidate.name === "string" && candidate.name) {
+        return candidate.name;
+      }
+      if (candidate.value === 16) {
+        return "txMalformed";
+      }
+      if (candidate.value === -5) {
+        return "txBadSeq";
+      }
+    }
+
+    const attributes = record._attributes;
+    if (attributes && typeof attributes === "object") {
+      queue.push(attributes);
+    }
+
+    for (const entry of Object.values(record)) {
+      if (entry && typeof entry === "object") {
+        queue.push(entry);
+      }
+    }
+  }
+
+  return null;
 }
 
 function toDisplayAmount(value: bigint | string | number | undefined): string {
@@ -427,6 +472,9 @@ export async function createBatchOnContract(input: {
       });
       const response = await rpcServer.sendTransaction(transaction as never);
       if (response.status === "ERROR") {
+        devLog("[soroban] sendTransaction error response", {
+          response
+        });
         const message = parseContractError(response.errorResult ?? "The batch creation transaction failed.");
         if (message === sequenceConflictMessage && attempt === 0) {
           devLog("[soroban] sequence conflict, rebuilding transaction", {
@@ -449,6 +497,9 @@ export async function createBatchOnContract(input: {
         attempts: 20
       });
       if (transactionStatus.status === "FAILED") {
+        devLog("[soroban] pollTransaction failed response", {
+          transactionStatus
+        });
         const message = parseContractError(transactionStatus.resultXdr ?? transactionStatus);
         if (message === sequenceConflictMessage && attempt === 0) {
           devLog("[soroban] sequence conflict during polling, rebuilding transaction", {
