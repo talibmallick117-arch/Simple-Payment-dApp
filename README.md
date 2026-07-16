@@ -150,7 +150,7 @@ The frontend can be deployed to Vercel or Netlify from the `frontend` directory.
 Fill these in after deployment:
 
 - Public GitHub repository: https://github.com/talibmallick117-arch/Simple-Payment-dApp
-- Live demo: simple-payment-d-app-frontend-ogu41b64w.vercel.app
+- Live demo: https://vercel.com/talibmallick117-7774s-projects/simple-payment-d-app-frontend
 - Vercel dashboard/project area: https://vercel.com/talibmallick117-7774s-projects
 - Payment Tracker contract address: CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB
 - Deployment network: Stellar Testnet
