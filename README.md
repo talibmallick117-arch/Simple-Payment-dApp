@@ -152,7 +152,7 @@ Fill these in after deployment:
 - Public GitHub repository: https://github.com/talibmallick117-arch/Simple-Payment-dApp
 - Live demo: 
 - Vercel dashboard/project area: https://vercel.com/talibmallick117-7774s-projects
-- Payment Tracker contract address: CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB
+- Payment Tracker contract address: GBODH3R6ZMWMXVOLC2MPPS5LMJMIJOPMUU4GLTDMKPQTRAK67BEQ7FH6
 - Deployment network: Stellar Testnet
 - Deployment transaction hash: https://stellar.expert/explorer/testnet/account/GBODH3R6ZMWMXVOLC2MPPS5LMJMIJOPMUU4GLTDMKPQTRAK67BEQ7FH6
 - Payment Stats contract address: CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM
