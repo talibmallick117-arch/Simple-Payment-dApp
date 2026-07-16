@@ -12,15 +12,23 @@ const DEFAULT_PAYMENT_TRACKER_CONTRACT_ID = "CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFW
 const DEFAULT_PAYMENT_STATS_CONTRACT_ID = "CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM";
 const DEFAULT_PAYMENT_TOKEN_CONTRACT_ID = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 
-const rpcUrl = import.meta.env.VITE_STELLAR_RPC_URL ?? DEFAULT_RPC_URL;
-const contractId = import.meta.env.VITE_PAYMENT_TRACKER_CONTRACT_ID ?? DEFAULT_PAYMENT_TRACKER_CONTRACT_ID;
+function normalizeEnvValue(value: string | undefined, fallback: string): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) return fallback;
+
+  const unwrapped = trimmed.replace(/^(['"])(.*)\1$/, "$2").trim();
+  return unwrapped || fallback;
+}
+
+const rpcUrl = normalizeEnvValue(import.meta.env.VITE_STELLAR_RPC_URL, DEFAULT_RPC_URL);
+const contractId = normalizeEnvValue(import.meta.env.VITE_PAYMENT_TRACKER_CONTRACT_ID, DEFAULT_PAYMENT_TRACKER_CONTRACT_ID);
 
 export const config = {
-  network: import.meta.env.VITE_STELLAR_NETWORK ?? DEFAULT_NETWORK,
+  network: normalizeEnvValue(import.meta.env.VITE_STELLAR_NETWORK, DEFAULT_NETWORK),
   rpcUrl,
   paymentTrackerContractId: contractId,
-  paymentStatsContractId: import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID ?? DEFAULT_PAYMENT_STATS_CONTRACT_ID,
-  paymentTokenContractId: import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID ?? DEFAULT_PAYMENT_TOKEN_CONTRACT_ID
+  paymentStatsContractId: normalizeEnvValue(import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID, DEFAULT_PAYMENT_STATS_CONTRACT_ID),
+  paymentTokenContractId: normalizeEnvValue(import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID, DEFAULT_PAYMENT_TOKEN_CONTRACT_ID)
 };
 
 export async function getRecentEvents(): Promise<MarketEvent[]> {
