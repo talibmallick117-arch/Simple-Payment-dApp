@@ -19,8 +19,9 @@ type RpcEvent = {
   id: string;
   ledger: number;
   ledgerClosedAt: string;
-  topic: unknown[];
-  value: unknown;
+  topic?: unknown[];
+  topics?: unknown[];
+  value?: unknown;
   contractId?: unknown;
 };
 
@@ -52,16 +53,49 @@ function describeScValType(value: unknown): string {
 
 function getScValSwitchInfo(value: unknown): ScValSwitchInfo | null {
   if (!value || typeof value !== "object") return null;
-  const switchFn = (value as { switch?: () => { name?: string; value?: number } }).switch;
-  if (typeof switchFn !== "function") return null;
 
-  const maybeSwitch = switchFn();
-  if (!maybeSwitch || typeof maybeSwitch !== "object") return null;
+  const candidate = value as {
+    switch?: () => unknown;
+    _switch?: unknown;
+  };
 
-  const name = typeof maybeSwitch.name === "string" ? maybeSwitch.name : "";
-  const numeric = typeof maybeSwitch.value === "number" ? maybeSwitch.value : Number.NaN;
-  if (!Number.isFinite(numeric)) return name ? { name, value: -1 } : null;
-  return { name, value: numeric };
+  try {
+    if (typeof candidate.switch === "function") {
+      const maybeSwitch = candidate.switch.call(value);
+      if (maybeSwitch && typeof maybeSwitch === "object") {
+        const typedSwitch = maybeSwitch as { name?: unknown; value?: unknown };
+        const name = typeof typedSwitch.name === "string" ? typedSwitch.name : "";
+        const numeric = typeof typedSwitch.value === "number" ? typedSwitch.value : Number.NaN;
+        if (Number.isFinite(numeric)) return { name, value: numeric };
+        if (name) return { name, value: -1 };
+      } else if (typeof maybeSwitch === "string" || typeof maybeSwitch === "number") {
+        return { name: "", value: Number(maybeSwitch) };
+      }
+    }
+
+    if (candidate._switch !== undefined) {
+      const maybeSwitch = candidate._switch;
+      if (maybeSwitch && typeof maybeSwitch === "object") {
+        const typedSwitch = maybeSwitch as { name?: unknown; value?: unknown };
+        const name = typeof typedSwitch.name === "string" ? typedSwitch.name : "";
+        const numeric = typeof typedSwitch.value === "number" ? typedSwitch.value : Number.NaN;
+        if (Number.isFinite(numeric)) return { name, value: numeric };
+        if (name) return { name, value: -1 };
+      } else if (typeof maybeSwitch === "string" || typeof maybeSwitch === "number") {
+        return { name: "", value: Number(maybeSwitch) };
+      }
+    }
+  } catch (error) {
+    devLog("[events] scval type inspection failed", {
+      error: error instanceof Error ? error.message : String(error),
+      typeofValue: typeof value,
+      hasSwitch: typeof candidate.switch === "function",
+      hasPrivateSwitch: candidate._switch !== undefined
+    });
+    return null;
+  }
+
+  return null;
 }
 
 function toBytesText(value: unknown): string {
@@ -75,11 +109,18 @@ function toBytesText(value: unknown): string {
 }
 
 function decodeScValByType(value: unknown, context: string, event: RpcEvent): { value: unknown; failed: boolean } {
+  const candidate = value as {
+    switch?: () => unknown;
+    _switch?: unknown;
+  };
   const switchInfo = getScValSwitchInfo(value);
   devLog("[events] decode scval", {
     context,
     contractId: event.contractId ?? "unknown",
     ledger: event.ledger,
+    typeofValue: typeof value,
+    hasSwitch: typeof candidate?.switch === "function",
+    hasPrivateSwitch: candidate?._switch !== undefined,
     switchName: switchInfo?.name ?? "unknown",
     switchValue: switchInfo?.value ?? "unknown"
   });
@@ -111,7 +152,7 @@ function decodeScValByType(value: unknown, context: string, event: RpcEvent): { 
       | "error"
   ) => {
     const fn = raw[method];
-    return typeof fn === "function" ? (fn as () => unknown)() : undefined;
+    return typeof fn === "function" ? (fn as (this: unknown) => unknown).call(value) : undefined;
   };
 
   switch (switchInfo.value) {
@@ -254,13 +295,14 @@ function extractNumericId(value: unknown): number | undefined {
 
 function decodeTopics(event: RpcEvent): { values: string[]; failed: boolean } {
   let failed = false;
-  const values = event.topic.map((entry, index) => {
+  const topics = Array.isArray(event.topic) ? event.topic : Array.isArray(event.topics) ? event.topics : [];
+  const values = topics.map((entry, index) => {
     const decoded = safeScValToNative(entry, `topic[${index}]`, event);
     failed ||= decoded.failed;
-    return toText(decoded.value);
+    return decoded.failed ? "N/A" : toText(decoded.value) || "N/A";
   });
 
-  return { values, failed };
+  return { values, failed: failed || topics.length === 0 };
 }
 
 function getEventName(group: string, action: string) {
@@ -290,14 +332,15 @@ function getBatchId(group: string, action: string, topicValues: string[], value:
 
 async function buildEventRow(
   event: RpcEvent,
-  batchCache: Map<number, BatchCacheEntry>
+  batchCache: Map<number, BatchCacheEntry>,
+  eventIndex: number
 ): Promise<MarketEvent> {
   const topicDecode = decodeTopics(event);
   const topicValues = topicDecode.values;
   const group = topicValues[0] ?? "event";
   const action = topicValues[1] ?? "event";
   const decodedValue = safeScValToNative(event.value, "value", event);
-  const batchId = getBatchId(group, action, topicValues, decodedValue.value);
+  const batchId = decodedValue.failed ? undefined : getBatchId(group, action, topicValues, decodedValue.value);
   const batch = typeof batchId === "number" ? await getBatchSummary(batchId, batchCache) : null;
   const timestamp = event.ledgerClosedAt ? new Date(event.ledgerClosedAt).toLocaleString() : undefined;
   let amount: string | undefined;
@@ -336,8 +379,9 @@ async function buildEventRow(
     ledger: event.ledger,
     ledgerClosedAt: event.ledgerClosedAt,
     contractId: event.contractId ?? "unknown",
+    eventIndex,
     topicValues,
-    topicTypes: event.topic.map((entry) => describeScValType(entry)),
+    topicTypes: (Array.isArray(event.topic) ? event.topic : Array.isArray(event.topics) ? event.topics : []).map((entry) => describeScValType(entry)),
     valueType: describeScValType(event.value),
     decodedValue: decodedValue.value,
     batchId,
@@ -405,5 +449,5 @@ export async function getRecentEvents(): Promise<MarketEvent[]> {
   });
 
   const batchCache = new Map<number, BatchCacheEntry>();
-  return Promise.all(response.events.map((event) => buildEventRow(event, batchCache)));
+  return Promise.all(response.events.map((event, index) => buildEventRow(event as RpcEvent, batchCache, index)));
 }

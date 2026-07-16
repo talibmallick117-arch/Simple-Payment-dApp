@@ -37,7 +37,8 @@ import { getRecentEvents } from "./events";
 import { loadBatchFromContract } from "./soroban";
 
 type MockScVal = {
-  switch: () => { name?: string; value?: number };
+  switch?: () => unknown;
+  _switch?: unknown;
   str?: () => string;
   sym?: () => string;
   i32?: () => number;
@@ -69,8 +70,26 @@ function mockI32ScVal(value: number): MockScVal {
   return mockScVal("scvI32", 4, { i32: () => value });
 }
 
+function mockAddressScVal(address: string): MockScVal {
+  return mockScVal("scvAddress", 18, {
+    address: () => ({
+      toString: () => address
+    })
+  });
+}
+
 function mockUnsupportedScVal(): MockScVal {
   return mockScVal("scvContractInstance", 19, { instance: () => ({}) });
+}
+
+function makeEvent(overrides: Record<string, unknown>) {
+  return {
+    id: "event-1",
+    ledger: 101,
+    ledgerClosedAt: "2026-07-15T10:01:00Z",
+    contractId: "CBTESTTRACKER",
+    ...overrides
+  };
 }
 
 beforeEach(() => {
@@ -81,19 +100,17 @@ beforeEach(() => {
 });
 
 describe("event decoding", () => {
-  it("decodes an I32 event value without throwing and preserves the rendered fields", async () => {
+  it("decodes a valid SCV_I32 event value", async () => {
     mocks.getEvents.mockResolvedValueOnce({
       latestLedger: 100,
       cursor: "",
       events: [
-        {
+        makeEvent({
           id: "1",
           ledger: 100,
-          ledgerClosedAt: "2026-07-15T10:00:00Z",
-          contractId: "CBTESTTRACKER",
           topic: [mockStringScVal("batch"), mockStringScVal("created")],
           value: mockI32ScVal(7)
-        }
+        })
       ]
     });
 
@@ -125,19 +142,54 @@ describe("event decoding", () => {
     });
   });
 
-  it("skips unsupported ScVal variants without breaking the rest of the event", async () => {
+  it("decodes valid address, string, and symbol fields", async () => {
     mocks.getEvents.mockResolvedValueOnce({
       latestLedger: 100,
       cursor: "",
       events: [
-        {
+        makeEvent({
           id: "2",
-          ledger: 101,
-          ledgerClosedAt: "2026-07-15T10:01:00Z",
-          contractId: "CBTESTTRACKER",
+          ledger: 102,
           topic: [mockStringScVal("batch"), mockStringScVal("created")],
-          value: mockUnsupportedScVal()
-        }
+          value: mockAddressScVal("GBOD6K5Q4GQ3R7ZL4QJ2P2L7KQ4S7K6R8H6M4QJ7FH6M4QJ7FH6M4QJ7")
+        })
+      ]
+    });
+
+    vi.mocked(loadBatchFromContract).mockResolvedValueOnce({
+      id: 102,
+      memo: "Batch 102",
+      sender: "GBOD6K5Q4GQ3R7ZL4QJ2P2L7KQ4S7K6R8H6M4QJ7FH6M4QJ7FH6M4QJ7",
+      token: "CBTOKEN",
+      statsContract: "CBSTATS",
+      totalAmount: "102",
+      recipientCount: 1,
+      sentCount: 0,
+      failedCount: 0,
+      refunded: false,
+      funded: false,
+      payments: []
+    });
+
+    const events = await getRecentEvents();
+
+    expect(events[0]).toMatchObject({
+      eventName: "Batch created",
+      decodeIssue: false
+    });
+  });
+
+  it("handles undefined event values without throwing", async () => {
+    mocks.getEvents.mockResolvedValueOnce({
+      latestLedger: 100,
+      cursor: "",
+      events: [
+        makeEvent({
+          id: "3",
+          ledger: 103,
+          topic: [mockStringScVal("batch"), mockStringScVal("created")],
+          value: undefined
+        })
       ]
     });
 
@@ -146,9 +198,122 @@ describe("event decoding", () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       eventName: "Batch created",
-      ledger: 101
+      batchId: undefined,
+      decodeIssue: true
+    });
+    expect(events[0].amount).toBeUndefined();
+  });
+
+  it("handles null event values without throwing", async () => {
+    mocks.getEvents.mockResolvedValueOnce({
+      latestLedger: 100,
+      cursor: "",
+      events: [
+        makeEvent({
+          id: "4",
+          ledger: 104,
+          topic: [mockStringScVal("batch"), mockStringScVal("created")],
+          value: null
+        })
+      ]
+    });
+
+    const events = await getRecentEvents();
+
+    expect(events[0]).toMatchObject({
+      eventName: "Batch created",
+      decodeIssue: true
+    });
+  });
+
+  it("handles missing topics without crashing the feed", async () => {
+    mocks.getEvents.mockResolvedValueOnce({
+      latestLedger: 100,
+      cursor: "",
+      events: [
+        makeEvent({
+          id: "5",
+          ledger: 105,
+          value: mockI32ScVal(9)
+        })
+      ]
+    });
+
+    const events = await getRecentEvents();
+
+    expect(events[0]).toMatchObject({
+      eventName: "Contract event",
+      batchId: undefined,
+      decodeIssue: true
+    });
+  });
+
+  it("handles undefined topic entries safely", async () => {
+    mocks.getEvents.mockResolvedValueOnce({
+      latestLedger: 100,
+      cursor: "",
+      events: [
+        makeEvent({
+          id: "6",
+          ledger: 106,
+          topic: [undefined, mockStringScVal("created")],
+          value: mockI32ScVal(1)
+        })
+      ]
+    });
+
+    const events = await getRecentEvents();
+
+    expect(events[0]).toMatchObject({
+      eventName: "Contract event",
+      decodeIssue: true
+    });
+  });
+
+  it("handles objects without switch() or _switch", async () => {
+    mocks.getEvents.mockResolvedValueOnce({
+      latestLedger: 100,
+      cursor: "",
+      events: [
+        makeEvent({
+          id: "7",
+          ledger: 107,
+          topic: [{}, {}],
+          value: {}
+        })
+      ]
+    });
+
+    const events = await getRecentEvents();
+
+    expect(events[0]).toMatchObject({
+      eventName: "Contract event",
+      decodeIssue: true
+    });
+  });
+
+  it("skips unsupported ScVal variants without breaking the event", async () => {
+    mocks.getEvents.mockResolvedValueOnce({
+      latestLedger: 100,
+      cursor: "",
+      events: [
+        makeEvent({
+          id: "8",
+          ledger: 108,
+          topic: [mockStringScVal("batch"), mockStringScVal("created")],
+          value: mockUnsupportedScVal()
+        })
+      ]
+    });
+
+    const events = await getRecentEvents();
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      eventName: "Batch created",
+      ledger: 108,
+      decodeIssue: true
     });
     expect(events[0].batchId).toBeUndefined();
-    expect(events[0].decodeIssue).toBe(true);
   });
 });
