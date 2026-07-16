@@ -6,15 +6,21 @@ export type MarketEvent = {
   ledger: number;
 };
 
-const rpcUrl = import.meta.env.VITE_STELLAR_RPC_URL ?? "https://soroban-testnet.stellar.org";
-const contractId = import.meta.env.VITE_PAYMENT_TRACKER_CONTRACT_ID ?? "";
+const DEFAULT_RPC_URL = "https://soroban-testnet.stellar.org";
+const DEFAULT_NETWORK = "testnet";
+const DEFAULT_PAYMENT_TRACKER_CONTRACT_ID = "CBNNUFSTMHM6FHDBPAC4J3IRAO4TLYDCDFWKCYGGOWG76LY5QNXXKESB";
+const DEFAULT_PAYMENT_STATS_CONTRACT_ID = "CBCSQQXQF4LDFXFZ7MRLPYHVOJGLYVVVOLUCNWF42AXQ4YCAJ4LBJQRM";
+const DEFAULT_PAYMENT_TOKEN_CONTRACT_ID = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+
+const rpcUrl = import.meta.env.VITE_STELLAR_RPC_URL ?? DEFAULT_RPC_URL;
+const contractId = import.meta.env.VITE_PAYMENT_TRACKER_CONTRACT_ID ?? DEFAULT_PAYMENT_TRACKER_CONTRACT_ID;
 
 export const config = {
-  network: import.meta.env.VITE_STELLAR_NETWORK ?? "testnet",
+  network: import.meta.env.VITE_STELLAR_NETWORK ?? DEFAULT_NETWORK,
   rpcUrl,
   paymentTrackerContractId: contractId,
-  paymentStatsContractId: import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID ?? "",
-  paymentTokenContractId: import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID ?? ""
+  paymentStatsContractId: import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID ?? DEFAULT_PAYMENT_STATS_CONTRACT_ID,
+  paymentTokenContractId: import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID ?? DEFAULT_PAYMENT_TOKEN_CONTRACT_ID
 };
 
 export async function getRecentEvents(): Promise<MarketEvent[]> {

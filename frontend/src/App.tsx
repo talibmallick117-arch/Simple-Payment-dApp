@@ -139,6 +139,17 @@ export function App() {
     []
   );
 
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+
+    console.debug("frontend config flags", {
+      trackerConfigured: Boolean(config.paymentTrackerContractId),
+      statsConfigured: Boolean(config.paymentStatsContractId),
+      tokenConfigured: Boolean(config.paymentTokenContractId),
+      rpcConfigured: Boolean(config.rpcUrl)
+    });
+  }, []);
+
   async function loadBatchFromCurrentId() {
     const id = Number(batchIdInput || 1);
     if (!Number.isFinite(id) || id <= 0) {
