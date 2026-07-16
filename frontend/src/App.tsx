@@ -168,6 +168,21 @@ export function App() {
     console.info("frontend config flags", diagnostics);
   }, [createBatchPhase, walletSession.connected]);
 
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+
+    console.log("import.meta.env (safe)", {
+      mode: import.meta.env.MODE,
+      prod: import.meta.env.PROD,
+      dev: import.meta.env.DEV,
+      vitePaymentTrackerContractId: import.meta.env.VITE_PAYMENT_TRACKER_CONTRACT_ID,
+      vitePaymentStatsContractId: import.meta.env.VITE_PAYMENT_STATS_CONTRACT_ID,
+      vitePaymentTokenContractId: import.meta.env.VITE_PAYMENT_TOKEN_CONTRACT_ID,
+      viteStellarRpcUrl: import.meta.env.VITE_STELLAR_RPC_URL,
+      viteStellarNetwork: import.meta.env.VITE_STELLAR_NETWORK
+    });
+  }, []);
+
   async function loadBatchFromCurrentId() {
     const id = Number(batchIdInput || 1);
     if (!Number.isFinite(id) || id <= 0) {
