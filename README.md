@@ -135,7 +135,8 @@ stellar contract id asset --asset native --network testnet
 
 The last command prints the exact contract ID to copy into `frontend/.env.local`.
 
-## CI/CD
+## CI/CD-<img width="1920" height="1080" alt="Screenshot 2026-07-16 232550" src="https://github.com/user-attachments/assets/f0226d95-984a-481a-b0d9-ad96c2e7f0cb" />
+
 
 GitHub Actions runs on every push and pull request:
 
